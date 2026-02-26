@@ -15,5 +15,11 @@
 from .observation_writer import ObservationWriter
 from .observation_writer import RawTurn
 from .reflection_writer import ReflectionWriter
+from .task_state_updater import TaskStateUpdater
 
-__all__ = ['ObservationWriter', 'RawTurn', 'ReflectionWriter']
+__all__ = [
+    'ObservationWriter',
+    'RawTurn',
+    'ReflectionWriter',
+    'TaskStateUpdater',
+]
