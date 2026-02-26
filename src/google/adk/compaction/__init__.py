@@ -14,8 +14,9 @@
 
 """Models for deterministic artifact compaction outputs."""
 
-from .models import CompactionStats
+from .assembly import HybridPromptAssembler
 from .config import HybridEventsCompactionConfig
+from .models import CompactionStats
 from .models import Decision
 from .models import EvidenceRef
 from .models import EvidencedItem
@@ -36,6 +37,7 @@ from .rehydration import TimeRange
 
 __all__ = [
     'CompactionStats',
+    'HybridPromptAssembler',
     'HybridEventsCompactionConfig',
     'Decision',
     'EvidenceRef',

@@ -41,3 +41,21 @@ class HybridEventsCompactionConfig(EventsCompactionConfig):
 
   enable_observational_memory: bool = False
   """Whether observational-memory compaction is enabled."""
+
+  enable_hybrid_prompt_assembly: bool = False
+  """Whether hybrid prompt assembly replaces default content assembly."""
+
+  hybrid_prompt_token_budget: int = 8_000
+  """Total token budget for hybrid prompt assembly layers."""
+
+  hybrid_raw_turns_count: int = 6
+  """Maximum number of latest raw turns to include in the prompt tail."""
+
+  hybrid_compactions_count: int = 6
+  """Maximum number of latest compaction artifacts to include."""
+
+  hybrid_observations_count: int = 3
+  """Maximum number of latest observations to include (1-3 recommended)."""
+
+  rehydration_evidence_token_budget: int = 2_000
+  """Token budget for optional evidence-pack rehydration payload."""

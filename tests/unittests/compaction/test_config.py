@@ -31,3 +31,9 @@ def test_hybrid_events_compaction_config_defaults():
   assert isinstance(config.patch_compactor, PatchCompactor)
   assert config.enable_deterministic_compaction is True
   assert config.enable_observational_memory is False
+  assert config.enable_hybrid_prompt_assembly is False
+  assert config.hybrid_prompt_token_budget == 8_000
+  assert config.hybrid_raw_turns_count == 6
+  assert config.hybrid_compactions_count == 6
+  assert config.hybrid_observations_count == 3
+  assert config.rehydration_evidence_token_budget == 2_000

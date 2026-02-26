@@ -42,6 +42,8 @@ class _ContentLlmRequestProcessor(BaseLlmRequestProcessor):
       self, invocation_context: InvocationContext, llm_request: LlmRequest
   ) -> AsyncGenerator[Event, None]:
     from ...models.google_llm import Gemini
+    from ...compaction.assembly import HybridPromptAssembler
+    from ...compaction.config import HybridEventsCompactionConfig
 
     agent = invocation_context.agent
     preserve_function_call_ids = False
@@ -58,12 +60,39 @@ class _ContentLlmRequestProcessor(BaseLlmRequestProcessor):
 
     if agent.include_contents == 'default':
       # Include full conversation history
-      llm_request.contents = _get_contents(
+      default_contents = _get_contents(
           invocation_context.branch,
           invocation_context.session.events,
           agent.name,
           preserve_function_call_ids=preserve_function_call_ids,
       )
+      llm_request.contents = default_contents
+
+      hybrid_config = invocation_context.events_compaction_config
+      if (
+          isinstance(hybrid_config, HybridEventsCompactionConfig)
+          and hybrid_config.enable_hybrid_prompt_assembly
+      ):
+        assembler = HybridPromptAssembler(
+            compaction_service=hybrid_config.compaction_service,
+            prompt_token_budget=hybrid_config.hybrid_prompt_token_budget,
+            raw_turns_count=hybrid_config.hybrid_raw_turns_count,
+            compactions_count=hybrid_config.hybrid_compactions_count,
+            observations_count=hybrid_config.hybrid_observations_count,
+            rehydration_evidence_token_budget=(
+                hybrid_config.rehydration_evidence_token_budget
+            ),
+        )
+        llm_request.contents = await assembler.assemble(
+            session_id=invocation_context.session.id,
+            events=invocation_context.session.events,
+            baseline_contents=default_contents,
+            system_instruction=(
+                llm_request.config.system_instruction
+                if isinstance(llm_request.config.system_instruction, str)
+                else None
+            ),
+        )
     else:
       # Include current turn context only (no conversation history)
       llm_request.contents = _get_current_turn_contents(
