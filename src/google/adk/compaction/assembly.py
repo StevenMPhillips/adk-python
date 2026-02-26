@@ -280,7 +280,9 @@ def _evidence_pack_payload(evidence_pack: EvidencePack | None) -> object | None:
   return evidence_pack.model_dump(mode='json', by_alias=True)
 
 
-def _compactions_payload(compactions: list[CompactionArtifact]) -> object | None:
+def _compactions_payload(
+    compactions: list[CompactionArtifact],
+) -> object | None:
   if not compactions:
     return None
   return [

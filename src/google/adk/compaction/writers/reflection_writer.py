@@ -42,9 +42,7 @@ class ReflectionWriter:
       max_observation_window: int = _DEFAULT_MAX_OBSERVATION_WINDOW,
   ):
     if observation_count_threshold <= 0:
-      raise ValueError(
-          'observation_count_threshold must be greater than zero.'
-      )
+      raise ValueError('observation_count_threshold must be greater than zero.')
     if max_observation_window <= 0:
       raise ValueError('max_observation_window must be greater than zero.')
     if max_observation_window < observation_count_threshold:

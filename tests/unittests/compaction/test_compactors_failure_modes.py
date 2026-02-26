@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pytest
-
 from google.adk.compaction.compactors.generic import GenericToolRunCompactor
 from google.adk.compaction.compactors.mypy_compactor import MypyCompactor
 from google.adk.compaction.compactors.patch_compactor import PatchCompactor
@@ -21,6 +19,7 @@ from google.adk.compaction.compactors.pytest_compactor import PytestCompactor
 from google.adk.compaction.compactors.ruff_compactor import RuffCompactor
 from google.adk.events.event import Event
 from google.genai import types
+import pytest
 
 
 def _tool_event(*, response: object, event_id: str = 'evt-failure') -> Event:
@@ -44,16 +43,15 @@ def _tool_event(*, response: object, event_id: str = 'evt-failure') -> Event:
 def _empty_tool_event() -> Event:
   return Event(
       author='agent',
-      content=types.Content(role='user', parts=[types.Part(text='no tool output')]),
+      content=types.Content(
+          role='user', parts=[types.Part(text='no tool output')]
+      ),
       id='evt-empty',
   )
 
 
 def _file_line_ref_tuples(compaction) -> list[tuple[str, int, int | None]]:
-  return [
-      (ref.path, ref.line, ref.col)
-      for ref in compaction.file_line_refs
-  ]
+  return [(ref.path, ref.line, ref.col) for ref in compaction.file_line_refs]
 
 
 @pytest.mark.parametrize(
@@ -119,8 +117,12 @@ def test_ruff_compactor_preserves_signatures_and_refs_under_noisy_output():
   }
 
   compactor = RuffCompactor()
-  clean = compactor.compact(_tool_event(response=clean_payload, event_id='evt-1'))
-  noisy = compactor.compact(_tool_event(response=noisy_payload, event_id='evt-2'))
+  clean = compactor.compact(
+      _tool_event(response=clean_payload, event_id='evt-1')
+  )
+  noisy = compactor.compact(
+      _tool_event(response=noisy_payload, event_id='evt-2')
+  )
 
   assert clean is not None
   assert noisy is not None
@@ -148,8 +150,12 @@ def test_mypy_compactor_preserves_signatures_and_refs_under_noisy_output():
   }
 
   compactor = MypyCompactor()
-  clean = compactor.compact(_tool_event(response=clean_payload, event_id='evt-3'))
-  noisy = compactor.compact(_tool_event(response=noisy_payload, event_id='evt-4'))
+  clean = compactor.compact(
+      _tool_event(response=clean_payload, event_id='evt-3')
+  )
+  noisy = compactor.compact(
+      _tool_event(response=noisy_payload, event_id='evt-4')
+  )
 
   assert clean is not None
   assert noisy is not None
@@ -164,10 +170,7 @@ def test_pytest_compactor_preserves_failure_signature_under_noisy_output():
       '  File "tests/test_auth.py", line 27, in test_login',
       '    assert login("alice", "bad")',
       'E   AssertionError: assert False',
-      (
-          'FAILED tests/test_auth.py::test_login '
-          '- AssertionError: assert False'
-      ),
+      'FAILED tests/test_auth.py::test_login - AssertionError: assert False',
   ]
   clean_payload = {'stdout': '\n'.join(pytest_lines), 'exit_code': 1}
   noisy_payload = {
@@ -182,8 +185,12 @@ def test_pytest_compactor_preserves_failure_signature_under_noisy_output():
   }
 
   compactor = PytestCompactor()
-  clean = compactor.compact(_tool_event(response=clean_payload, event_id='evt-5'))
-  noisy = compactor.compact(_tool_event(response=noisy_payload, event_id='evt-6'))
+  clean = compactor.compact(
+      _tool_event(response=clean_payload, event_id='evt-5')
+  )
+  noisy = compactor.compact(
+      _tool_event(response=noisy_payload, event_id='evt-6')
+  )
 
   assert clean is not None
   assert noisy is not None

@@ -15,8 +15,8 @@
 from google.adk.compaction.assembly import HybridPromptAssembler
 from google.adk.compaction.models import CompactionStats
 from google.adk.compaction.models import Decision
-from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import FileLineRef
 from google.adk.compaction.models import Observation
 from google.adk.compaction.models import PatchCompaction
@@ -24,9 +24,7 @@ from google.adk.compaction.models import Provenance
 from google.adk.compaction.models import Reflection
 from google.adk.compaction.models import TaskStateAnchor
 from google.adk.compaction.models import ToolRunCompaction
-from google.adk.compaction.storage.in_memory_compaction_service import (
-    InMemoryCompactionService,
-)
+from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 from google.adk.events.event import Event
 from google.adk.flows.llm_flows import contents as contents_module
 from google.genai import types
@@ -130,7 +128,9 @@ async def test_hybrid_prompt_assembly_orders_layers_and_inserts_evidence_pack():
               text='Retry with focused test first.',
               kind='explicit',
               evidence_refs=[
-                  EvidenceRef(ref_type='event', ref_id=function_response_event.id)
+                  EvidenceRef(
+                      ref_type='event', ref_id=function_response_event.id
+                  )
               ],
           )
       ],
@@ -200,7 +200,9 @@ async def test_hybrid_prompt_assembly_orders_layers_and_inserts_evidence_pack():
       i for i, text in enumerate(prompt_texts) if text.startswith('[TaskState]')
   )
   reflection_idx = next(
-      i for i, text in enumerate(prompt_texts) if text.startswith('[Reflection]')
+      i
+      for i, text in enumerate(prompt_texts)
+      if text.startswith('[Reflection]')
   )
   observations_idx = next(
       i
@@ -208,7 +210,9 @@ async def test_hybrid_prompt_assembly_orders_layers_and_inserts_evidence_pack():
       if text.startswith('[Observations]')
   )
   evidence_idx = next(
-      i for i, text in enumerate(prompt_texts) if text.startswith('[Evidence Pack]')
+      i
+      for i, text in enumerate(prompt_texts)
+      if text.startswith('[Evidence Pack]')
   )
   compactions_idx = next(
       i
@@ -241,9 +245,7 @@ async def test_hybrid_prompt_assembly_reduces_prompt_tokens_over_20_turn_session
                           id='call-2',
                           name='run_shell',
                           args={
-                              'command': (
-                                  'pytest tests/test_long.py::test_loop'
-                              )
+                              'command': 'pytest tests/test_long.py::test_loop'
                           },
                       )
                   )

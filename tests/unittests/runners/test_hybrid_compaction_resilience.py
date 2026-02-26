@@ -20,9 +20,7 @@ from google.adk.apps.app import EventsCompactionConfig
 from google.adk.compaction.compactors.patch_compactor import PatchCompactor
 from google.adk.compaction.compactors.registry import ToolRunCompactorRegistry
 from google.adk.compaction.config import HybridEventsCompactionConfig
-from google.adk.compaction.storage.in_memory_compaction_service import (
-    InMemoryCompactionService,
-)
+from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 from google.adk.tools.function_tool import FunctionTool
 from google.genai.types import FunctionCall
 from google.genai.types import Part

@@ -18,15 +18,13 @@ from unittest.mock import Mock
 
 from google.adk.compaction.models import CompactionStats
 from google.adk.compaction.models import Decision
-from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import Observation
 from google.adk.compaction.models import Provenance
 from google.adk.compaction.models import TaskStateAnchor
 from google.adk.compaction.models import ToolRunCompaction
-from google.adk.compaction.storage.in_memory_compaction_service import (
-    InMemoryCompactionService,
-)
+from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 from google.adk.compaction.writers.task_state_updater import TaskStateUpdater
 from google.adk.models.base_llm import BaseLlm
 from google.genai.types import Content

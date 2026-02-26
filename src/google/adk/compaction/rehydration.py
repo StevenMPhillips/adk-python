@@ -34,9 +34,7 @@ CompactionArtifact = ToolRunCompaction | PatchCompaction
 _FILE_PATH_RE = re.compile(
     r'(?P<path>[A-Za-z0-9_./-]+\.(?:py|pyi|md|txt|json|yaml|yml))'
 )
-_TEST_NAME_RE = re.compile(
-    r'(?P<test>[A-Za-z0-9_./-]+::[A-Za-z0-9_\[\].-]+)'
-)
+_TEST_NAME_RE = re.compile(r'(?P<test>[A-Za-z0-9_./-]+::[A-Za-z0-9_\[\].-]+)')
 _SIGNATURE_RE = re.compile(r'(?P<sig>[A-Z][A-Za-z0-9_]+(?:Error|Exception))')
 _OLDER_REFERENCE_RE = re.compile(
     r'\b(earlier|before|previous|prior|last\s+time|older)\b',
@@ -307,9 +305,9 @@ class RehydrationExecutor:
       )
 
     if query.file_path:
-      artifacts.extend(await self._compaction_service.query_by_file_path(
-          query.file_path
-      ))
+      artifacts.extend(
+          await self._compaction_service.query_by_file_path(query.file_path)
+      )
 
     if not query.error_signature and not query.file_path:
       return []

@@ -14,9 +14,9 @@
 
 from collections import Counter
 
-from google.genai import types
 from google.adk.compaction.compactors.patch_compactor import PatchCompactor
 from google.adk.events.event import Event
+from google.genai import types
 
 
 def _tool_event(stdout: str) -> Event:

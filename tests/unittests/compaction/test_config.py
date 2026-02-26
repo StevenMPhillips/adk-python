@@ -15,9 +15,7 @@
 from google.adk.compaction.compactors.patch_compactor import PatchCompactor
 from google.adk.compaction.compactors.registry import ToolRunCompactorRegistry
 from google.adk.compaction.config import HybridEventsCompactionConfig
-from google.adk.compaction.storage.in_memory_compaction_service import (
-    InMemoryCompactionService,
-)
+from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 
 
 def test_hybrid_events_compaction_config_defaults():
@@ -27,7 +25,9 @@ def test_hybrid_events_compaction_config_defaults():
       overlap_size=0,
   )
 
-  assert isinstance(config.tool_run_compactor_registry, ToolRunCompactorRegistry)
+  assert isinstance(
+      config.tool_run_compactor_registry, ToolRunCompactorRegistry
+  )
   assert isinstance(config.patch_compactor, PatchCompactor)
   assert config.enable_deterministic_compaction is True
   assert config.enable_observational_memory is False

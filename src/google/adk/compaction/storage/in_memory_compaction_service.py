@@ -14,12 +14,12 @@
 
 from __future__ import annotations
 
-from .base_compaction_service import BaseCompactionService
 from ..models import Observation
 from ..models import PatchCompaction
 from ..models import Reflection
 from ..models import TaskStateAnchor
 from ..models import ToolRunCompaction
+from .base_compaction_service import BaseCompactionService
 
 
 class InMemoryCompactionService(BaseCompactionService):
@@ -99,7 +99,9 @@ class InMemoryCompactionService(BaseCompactionService):
   ) -> list[ToolRunCompaction]:
     return [
         tool_run_compaction
-        for tool_run_compaction in self._tool_run_compaction_by_event_id.values()
+        for tool_run_compaction in (
+            self._tool_run_compaction_by_event_id.values()
+        )
         if signature in tool_run_compaction.error_signatures
     ]
 

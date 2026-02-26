@@ -13,8 +13,8 @@
 # limitations under the License.
 
 from google.adk.compaction.models import CompactionStats
-from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import FileLineRef
 from google.adk.compaction.models import HunkSummary
 from google.adk.compaction.models import Observation
@@ -26,9 +26,7 @@ from google.adk.compaction.rehydration import RehydrationExecutor
 from google.adk.compaction.rehydration import RehydrationPlanner
 from google.adk.compaction.rehydration import RetrievalQuery
 from google.adk.compaction.rehydration import TimeRange
-from google.adk.compaction.storage.in_memory_compaction_service import (
-    InMemoryCompactionService,
-)
+from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 import pytest
 
 
@@ -216,7 +214,9 @@ async def test_rehydration_executor_retrieves_and_budgets_evidence_pack():
 
   assert evidence_pack.token_budget == 2000
   assert evidence_pack.tokens_est > 0
-  assert [artifact.event_id for artifact in evidence_pack.compacted_artifacts] == [
+  assert [
+      artifact.event_id for artifact in evidence_pack.compacted_artifacts
+  ] == [
       'evt-in',
       'evt-patch',
   ]

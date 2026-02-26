@@ -34,7 +34,9 @@ class ToolRunCompactorRegistry:
         ('flake8', ruff_compactor),
     ]
 
-  def register(self, command_match: str, compactor: BaseToolRunCompactor) -> None:
+  def register(
+      self, command_match: str, compactor: BaseToolRunCompactor
+  ) -> None:
     """Registers a compactor for command substring matching."""
     normalized = command_match.strip().lower()
     if not normalized:

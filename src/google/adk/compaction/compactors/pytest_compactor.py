@@ -35,8 +35,7 @@ from .generic import _safe_to_text
 _DEFAULT_TOKEN_BUDGET = 600
 _DEFAULT_ERROR_TYPE = 'UnknownError'
 _FAILED_ERROR_LINE_PATTERN = re.compile(
-    r'^(?:FAILED|ERROR)\s+(?P<test_id>\S+)'
-    r'(?:\s*-\s*(?P<reason>.+))?$'
+    r'^(?:FAILED|ERROR)\s+(?P<test_id>\S+)' r'(?:\s*-\s*(?P<reason>.+))?$'
 )
 _TRACEBACK_FILE_LINE_PATTERN = re.compile(
     r'^\s*File\s+"(?P<path>[^"]+)",\s+line\s+(?P<line>\d+)'
@@ -137,10 +136,9 @@ class PytestCompactor(BaseToolRunCompactor):
         trace_lines.append(stripped_line)
         continue
 
-      if (
-          stripped_line.startswith('Traceback (most recent call last):')
-          or _TRACEBACK_FILE_LINE_PATTERN.match(line)
-      ):
+      if stripped_line.startswith(
+          'Traceback (most recent call last):'
+      ) or _TRACEBACK_FILE_LINE_PATTERN.match(line):
         trace_lines.append(stripped_line)
 
     tests_failed = _dedupe_preserving_order(tests_failed)
@@ -166,7 +164,9 @@ class PytestCompactor(BaseToolRunCompactor):
     if not key_errors:
       key_errors = [line for line in trace_lines if line][:5]
 
-    file_line_refs = _extract_file_line_refs('\n'.join([stdout_text, stderr_text]))
+    file_line_refs = _extract_file_line_refs(
+        '\n'.join([stdout_text, stderr_text])
+    )
     traceback_refs = _extract_traceback_file_line_refs(output_lines)
     seen_refs: set[tuple[str, int, int | None]] = {
         (ref.path, ref.line, ref.col) for ref in file_line_refs

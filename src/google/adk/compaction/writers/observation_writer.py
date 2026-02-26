@@ -146,7 +146,9 @@ class ObservationWriter:
       )
       if response_text:
         return response_text
-    raise ValueError('ObservationWriter LLM response did not include JSON text.')
+    raise ValueError(
+        'ObservationWriter LLM response did not include JSON text.'
+    )
 
   def _validate_inputs(
       self,
@@ -230,14 +232,13 @@ class ObservationWriter:
     }
     context_json = json.dumps(payload, indent=2, sort_keys=True)
     return (
-        'Generate exactly one Observation JSON object for the target seq range. '
-        'Use only evidence present in the provided context. Every item in '
-        'decisions and learnedConstraints must include at least one '
-        'evidenceRefs entry. Set decision.kind to "explicit" only when the '
-        'decision is directly evidenced by cited material; otherwise set '
-        'decision.kind to "inferred". Every evidenceRefs.refId must be in '
-        'allowedEvidenceRefIds. Return JSON only.\n\n'
-        f'Context:\n{context_json}'
+        'Generate exactly one Observation JSON object for the target seq'
+        ' range. Use only evidence present in the provided context. Every item'
+        ' in decisions and learnedConstraints must include at least one'
+        ' evidenceRefs entry. Set decision.kind to "explicit" only when the'
+        ' decision is directly evidenced by cited material; otherwise set'
+        ' decision.kind to "inferred". Every evidenceRefs.refId must be in'
+        f' allowedEvidenceRefIds. Return JSON only.\n\nContext:\n{context_json}'
     )
 
   def _validate_observation(

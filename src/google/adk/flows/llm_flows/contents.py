@@ -41,9 +41,9 @@ class _ContentLlmRequestProcessor(BaseLlmRequestProcessor):
   async def run_async(
       self, invocation_context: InvocationContext, llm_request: LlmRequest
   ) -> AsyncGenerator[Event, None]:
-    from ...models.google_llm import Gemini
     from ...compaction.assembly import HybridPromptAssembler
     from ...compaction.config import HybridEventsCompactionConfig
+    from ...models.google_llm import Gemini
 
     agent = invocation_context.agent
     preserve_function_call_ids = False

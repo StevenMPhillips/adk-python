@@ -17,8 +17,8 @@ import math
 
 from google.adk.compaction.assembly import HybridPromptAssembler
 from google.adk.compaction.models import CompactionStats
-from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import FileLineRef
 from google.adk.compaction.models import Observation
 from google.adk.compaction.models import PatchCompaction
@@ -26,9 +26,7 @@ from google.adk.compaction.models import Provenance
 from google.adk.compaction.models import Reflection
 from google.adk.compaction.models import TaskStateAnchor
 from google.adk.compaction.models import ToolRunCompaction
-from google.adk.compaction.storage.in_memory_compaction_service import (
-    InMemoryCompactionService,
-)
+from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 from google.adk.events.event import Event
 from google.adk.flows.llm_flows import contents as contents_module
 from google.genai import types
@@ -133,8 +131,7 @@ async def test_hybrid_compaction_regression_harness_over_60_turns(
     )
     if turn == total_turns:
       user_text += (
-          ' Please revisit older AssertionError evidence from '
-          'src/module_1.py.'
+          ' Please revisit older AssertionError evidence from src/module_1.py.'
       )
     events.append(
         _make_text_event(
@@ -148,8 +145,8 @@ async def test_hybrid_compaction_regression_harness_over_60_turns(
             invocation_id=f'inv-agent-{turn}',
             author='agent',
             text=(
-                f'agent turn {turn}: running focused diagnostics and summarizing'
-                ' findings.'
+                f'agent turn {turn}: running focused diagnostics and'
+                ' summarizing findings.'
             ),
         )
     )
@@ -193,8 +190,7 @@ async def test_hybrid_compaction_regression_harness_over_60_turns(
                         name='run_shell',
                         response={
                             'command': (
-                                'pytest '
-                                f'tests/perf_suite.py::test_case_{turn}'
+                                f'pytest tests/perf_suite.py::test_case_{turn}'
                             ),
                             'stderr': (
                                 'AssertionError: compaction regression '
@@ -223,7 +219,9 @@ async def test_hybrid_compaction_regression_harness_over_60_turns(
             error_signatures=['AssertionError'],
             key_errors=['AssertionError: compaction regression candidate'],
             tests_failed=[f'tests/perf_suite.py::test_case_{index}'],
-            file_line_refs=[FileLineRef(path='src/module_1.py', line=40 + index)],
+            file_line_refs=[
+                FileLineRef(path='src/module_1.py', line=40 + index)
+            ],
             trimmed_trace=['Traceback ... AssertionError'],
             salient_snippets=['assert baseline_tokens > hybrid_tokens'],
             stats=CompactionStats(
@@ -285,7 +283,9 @@ async def test_hybrid_compaction_regression_harness_over_60_turns(
       Reflection(
           session_id=session_id,
           covers_observation_ids=[],
-          text='Preserve concise evidence while keeping a small raw-tail window.',
+          text=(
+              'Preserve concise evidence while keeping a small raw-tail window.'
+          ),
           stable_facts=[],
           recurring_failures=[],
           strategy_updates=[],
@@ -339,12 +339,12 @@ async def test_hybrid_compaction_regression_harness_over_60_turns(
   assert baseline_tokens >= 2_000
   assert hybrid_tokens < baseline_tokens
 
-  assert hybrid_tokens <= math.ceil(baseline_fixture['hybrid_tokens_est'] * 1.15)
-  assert (
-      tokens_reduced_permille
-      >= math.floor(baseline_fixture['tokens_reduced_permille'] * 0.85)
+  assert hybrid_tokens <= math.ceil(
+      baseline_fixture['hybrid_tokens_est'] * 1.15
   )
-  assert (
-      storage_reads_proxy
-      <= math.ceil(baseline_fixture['storage_reads_proxy'] * 1.25)
+  assert tokens_reduced_permille >= math.floor(
+      baseline_fixture['tokens_reduced_permille'] * 0.85
+  )
+  assert storage_reads_proxy <= math.ceil(
+      baseline_fixture['storage_reads_proxy'] * 1.25
   )

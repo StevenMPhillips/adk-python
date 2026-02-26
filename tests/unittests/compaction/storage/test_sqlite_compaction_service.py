@@ -16,8 +16,8 @@ import sqlite3
 
 from google.adk.compaction.models import CompactionStats
 from google.adk.compaction.models import Decision
-from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import FileLineRef
 from google.adk.compaction.models import HunkSummary
 from google.adk.compaction.models import Observation
@@ -26,12 +26,8 @@ from google.adk.compaction.models import Provenance
 from google.adk.compaction.models import Reflection
 from google.adk.compaction.models import TaskStateAnchor
 from google.adk.compaction.models import ToolRunCompaction
-from google.adk.compaction.storage.sqlite_compaction_service import (
-    SCHEMA_VERSION_KEY,
-)
-from google.adk.compaction.storage.sqlite_compaction_service import (
-    SqliteCompactionService,
-)
+from google.adk.compaction.storage.sqlite_compaction_service import SCHEMA_VERSION_KEY
+from google.adk.compaction.storage.sqlite_compaction_service import SqliteCompactionService
 import pytest
 
 

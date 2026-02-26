@@ -17,13 +17,11 @@ from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
 from google.adk.compaction.models import Decision
-from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import Observation
 from google.adk.compaction.models import TaskStateAnchor
-from google.adk.compaction.storage.in_memory_compaction_service import (
-    InMemoryCompactionService,
-)
+from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 from google.adk.compaction.writers.observation_writer import ObservationWriter
 from google.adk.compaction.writers.observation_writer import RawTurn
 from google.adk.models.base_llm import BaseLlm
@@ -49,7 +47,9 @@ def _sample_task_state() -> TaskStateAnchor:
       constraints=[_sample_item('Keep outputs evidence-backed.', 'evt-1')],
       hypotheses=[_sample_item('Structured prompts reduce drift.', 'evt-1')],
       known_failures=[_sample_item('Missing refs break trust.', 'evt-1')],
-      current_plan=[_sample_item('Generate one observation per window.', 'evt-1')],
+      current_plan=[
+          _sample_item('Generate one observation per window.', 'evt-1')
+      ],
       next_steps=[_sample_item('Add writer tests.', 'evt-1')],
       last_updated_seq=22,
   )
@@ -195,7 +195,9 @@ class TestObservationWriter(unittest.IsolatedAsyncioTestCase):
         next_steps=[],
         evidence_refs=[],
     ).model_dump_json(by_alias=True)
-    mock_llm_response = Mock(content=Content(parts=[Part(text=invalid_observation)]))
+    mock_llm_response = Mock(
+        content=Content(parts=[Part(text=invalid_observation)])
+    )
 
     async def async_gen():
       yield mock_llm_response
@@ -218,7 +220,9 @@ class TestObservationWriter(unittest.IsolatedAsyncioTestCase):
 
   async def test_maybe_write_observation_rejects_unknown_evidence_refs(self):
     mock_llm_response = Mock(
-        content=Content(parts=[Part(text=_sample_observation_json('evt-unknown'))])
+        content=Content(
+            parts=[Part(text=_sample_observation_json('evt-unknown'))]
+        )
     )
 
     async def async_gen():

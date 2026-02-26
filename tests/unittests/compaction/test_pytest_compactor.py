@@ -50,17 +50,17 @@ def test_pytest_compactor_extracts_single_failure_artifacts():
   stdout = '\n'.join([
       noisy_prefix,
       '============================= FAILURES ==============================',
-      '______________________________ test_login ______________________________',
+      (
+          '______________________________ test_login'
+          ' ______________________________'
+      ),
       '    def test_login():',
       '      assert login("alice", "bad")',
       'E   AssertionError: assert False',
       '',
       'tests/test_auth.py:27: AssertionError',
       '=========================== short test summary info ===================',
-      (
-          'FAILED tests/test_auth.py::test_login '
-          '- AssertionError: assert False'
-      ),
+      'FAILED tests/test_auth.py::test_login - AssertionError: assert False',
       '============================== 1 failed in 0.12s ======================',
   ])
 
@@ -134,6 +134,8 @@ def test_pytest_compactor_extracts_multi_failure_traceback_artifacts():
       ref.path == '/workspace/src/app/db.py' and ref.line == 71
       for ref in compaction.file_line_refs
   )
-  assert any('Traceback (most recent call last):' in line
-             for line in compaction.trimmed_trace)
+  assert any(
+      'Traceback (most recent call last):' in line
+      for line in compaction.trimmed_trace
+  )
   assert compaction.stats.compression_ratio > 10.0

@@ -14,8 +14,8 @@
 
 from google.adk.compaction.models import CompactionStats
 from google.adk.compaction.models import Decision
-from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import FileLineRef
 from google.adk.compaction.models import HunkSummary
 from google.adk.compaction.models import Observation
@@ -24,9 +24,7 @@ from google.adk.compaction.models import Provenance
 from google.adk.compaction.models import Reflection
 from google.adk.compaction.models import TaskStateAnchor
 from google.adk.compaction.models import ToolRunCompaction
-from google.adk.compaction.storage.in_memory_compaction_service import (
-    InMemoryCompactionService,
-)
+from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 import pytest
 
 
@@ -126,7 +124,9 @@ async def test_save_and_get_all_artifact_types():
       constraints=[_sample_item('Keep methods async.', 'evt-tool-1')],
       hypotheses=[_sample_item('Simple dicts are enough.', 'evt-patch-1')],
       known_failures=[_sample_item('Schema drift risk.', 'evt-tool-1')],
-      current_plan=[_sample_item('Implement in-memory service.', 'evt-patch-1')],
+      current_plan=[
+          _sample_item('Implement in-memory service.', 'evt-patch-1')
+      ],
       next_steps=[_sample_item('Add focused tests.', 'evt-patch-1')],
       last_updated_seq=8,
   )

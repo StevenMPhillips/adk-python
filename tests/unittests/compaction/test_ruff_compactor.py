@@ -47,7 +47,10 @@ def _tool_event(
 
 def test_ruff_compactor_extracts_rule_codes_refs_and_messages():
   stdout = '\n'.join([
-      'src/google/adk/tools/mcp_tool/client.py:41:7: F401 `json` imported but unused',
+      (
+          'src/google/adk/tools/mcp_tool/client.py:41:7: F401 `json` imported'
+          ' but unused'
+      ),
       (
           'src/google/adk/cli/cli_tools_click.py:119:13: '
           'E722 Do not use bare `except`'
@@ -99,11 +102,13 @@ def test_ruff_compactor_applies_token_budget_to_trimmed_trace():
       'src/google/adk/c.py:30:3: I001 item three message text',
   ])
 
-  compaction = RuffCompactor(token_budget=16).compact(_tool_event(stdout=stdout))
+  compaction = RuffCompactor(token_budget=16).compact(
+      _tool_event(stdout=stdout)
+  )
 
   assert compaction is not None
   assert len(compaction.trimmed_trace) < 3
-  assert compaction.trimmed_trace == [] or compaction.trimmed_trace[-1].startswith(
-      'src/google/adk/c.py'
-  )
+  assert compaction.trimmed_trace == [] or compaction.trimmed_trace[
+      -1
+  ].startswith('src/google/adk/c.py')
   assert compaction.stats.compact_tokens_est <= 16

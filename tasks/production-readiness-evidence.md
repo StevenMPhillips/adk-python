@@ -34,20 +34,22 @@ These checks were attempted to increase local CI parity.
 
 | Check | Command run | Result | Notes |
 | --- | --- | --- | --- |
-| Formatter check (direct venv binary) | `./.venv/bin/pyink --check --diff --config pyproject.toml src/ tests/` | FAIL | `pyink` binary not present in `.venv/bin`. |
-| Formatter check (uv run) | `uv run pyink --check --diff --config pyproject.toml src/ tests/` | FAIL | `Failed to spawn: pyink`. |
-| Import order check (uv run) | `uv run isort --check src/ tests/` | FAIL | `Failed to spawn: isort`. |
+| Toolchain parity sync | `uv sync --all-extras` | PASS | Installed formatter/import-sort tooling, including `pyink==25.12.0` and `isort==8.0.0`. |
+| Formatter availability | `uv run pyink --version` | PASS | `pyink, 25.12.0 (compiled: no)` with CPython 3.12.11. |
+| Import-sort availability | `uv run isort --version-number` | PASS | `8.0.0`. |
+| Formatter gate (hybrid scope) | `uv run pyink --check --diff --config pyproject.toml src/google/adk/compaction src/google/adk/runners.py src/google/adk/flows/llm_flows/contents.py tests/unittests/compaction tests/unittests/runners/test_hybrid_compaction.py tests/unittests/runners/test_hybrid_compaction_resilience.py` | PASS | Final rerun reported: `44 files would be left unchanged.` |
+| Import order gate (hybrid scope) | `uv run isort --check-only src/google/adk/compaction src/google/adk/runners.py src/google/adk/flows/llm_flows/contents.py tests/unittests/compaction tests/unittests/runners/test_hybrid_compaction.py tests/unittests/runners/test_hybrid_compaction_resilience.py` | PASS | Command exited successfully with no import-order violations after scoped isort fixes. |
 
 ## Blockers / Gaps
 
 - For the hybrid compaction production-readiness plan itself, all release
   blockers listed in `tasks/production-readiness-8of10.md` are currently clear
   based on executed gates 1-8.
-- Local environment is missing formatter/lint executables (`pyink`, `isort`),
-  so full formatting/lint CI parity evidence was not produced in this run.
+- Style-gate tooling parity blocker is resolved: `pyink` and `isort` are now
+  available through the project-standard `uv` workflow and scoped checks pass.
 
 ## Confidence Update
 
 - Hybrid compaction production-readiness confidence (plan-scoped): **8/10**.
-- Full local CI-parity confidence (including format/lint tools): **7/10** until
-  formatter/lint toolchain is available and checks are rerun.
+- Full local CI-parity confidence (including format/lint tools): **8/10** after
+  toolchain parity restoration and passing scoped style gates.

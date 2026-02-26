@@ -117,7 +117,11 @@ def _parse_unified_diff(
   def finalize_hunk() -> None:
     nonlocal current_hunk_header
     nonlocal current_hunk_lines
-    if current_hunk_lines is None or not current_path or not current_hunk_header:
+    if (
+        current_hunk_lines is None
+        or not current_path
+        or not current_hunk_header
+    ):
       current_hunk_header = ''
       current_hunk_lines = None
       return
@@ -204,9 +208,13 @@ def _select_hunks_with_budget(
   selected: list[_ParsedHunk] = []
   consumed_tokens = 0
 
-  for hunk in sorted(parsed_hunks, key=lambda item: item.change_size, reverse=True):
+  for hunk in sorted(
+      parsed_hunks, key=lambda item: item.change_size, reverse=True
+  ):
     hunk_tokens = _estimate_token_count(
-        '\n'.join([hunk.path, hunk.anchor_before, hunk.anchor_after, hunk.snippet])
+        '\n'.join(
+            [hunk.path, hunk.anchor_before, hunk.anchor_after, hunk.snippet]
+        )
     )
     if consumed_tokens + hunk_tokens > remaining_budget:
       if not selected:
@@ -238,21 +246,19 @@ def _build_compact_text(
     hunks: list[HunkSummary],
 ) -> str:
   """Builds canonical compacted text used for token estimation."""
-  return '\n'.join(
-      [
-          *files_changed,
-          *semantic_tags,
-          *[
-              '\n'.join([
-                  hunk.path,
-                  hunk.anchor_before,
-                  hunk.anchor_after,
-                  hunk.snippet,
-              ])
-              for hunk in hunks
-          ],
-      ]
-  )
+  return '\n'.join([
+      *files_changed,
+      *semantic_tags,
+      *[
+          '\n'.join([
+              hunk.path,
+              hunk.anchor_before,
+              hunk.anchor_after,
+              hunk.snippet,
+          ])
+          for hunk in hunks
+      ],
+  ])
 
 
 class PatchCompactor:

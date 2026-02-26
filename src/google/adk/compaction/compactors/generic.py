@@ -92,9 +92,7 @@ def _extract_exit_code(payload: dict[str, Any]) -> int:
   return 0
 
 
-def _extract_command(
-    function_name: str, payload: dict[str, Any]
-) -> str:
+def _extract_command(function_name: str, payload: dict[str, Any]) -> str:
   """Extracts command text for registry matching and diagnostics."""
   for key in ('command', 'cmd'):
     value = payload.get(key)
@@ -200,21 +198,21 @@ class GenericToolRunCompactor(BaseToolRunCompactor):
       compression_ratio = raw_tokens_est / compact_tokens_est
 
     return ToolRunCompaction(
-      event_id=event.id,
-      compaction_version=1,
-      command=command,
-      exit_code=exit_code,
-      duration_ms=_safe_to_int(payload.get('duration_ms')),
-      error_signatures=[],
-      key_errors=key_errors,
-      tests_failed=[],
-      file_line_refs=refs,
-      trimmed_trace=trimmed_trace,
-      salient_snippets=[],
-      stats=CompactionStats(
-          raw_tokens_est=raw_tokens_est,
-          compact_tokens_est=compact_tokens_est,
-          compression_ratio=compression_ratio,
-      ),
-      provenance=Provenance(event_id=event.id),
+        event_id=event.id,
+        compaction_version=1,
+        command=command,
+        exit_code=exit_code,
+        duration_ms=_safe_to_int(payload.get('duration_ms')),
+        error_signatures=[],
+        key_errors=key_errors,
+        tests_failed=[],
+        file_line_refs=refs,
+        trimmed_trace=trimmed_trace,
+        salient_snippets=[],
+        stats=CompactionStats(
+            raw_tokens_est=raw_tokens_est,
+            compact_tokens_est=compact_tokens_est,
+            compression_ratio=compression_ratio,
+        ),
+        provenance=Provenance(event_id=event.id),
     )

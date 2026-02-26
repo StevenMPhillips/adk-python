@@ -68,14 +68,8 @@ def test_mypy_compactor_extracts_error_codes_refs_and_messages():
 
   assert compaction is not None
   assert compaction.error_signatures == [
-      (
-          'mypy::assignment::'
-          'src/google/adk/flows/llm_flows/base_llm_flow.py'
-      ),
-      (
-          'mypy::union-attr::'
-          'src/google/adk/models/gemini_llm_connection.py'
-      ),
+      'mypy::assignment::src/google/adk/flows/llm_flows/base_llm_flow.py',
+      'mypy::union-attr::src/google/adk/models/gemini_llm_connection.py',
       'mypy::return::tests/unittests/streaming/test_live.py',
   ]
   assert compaction.key_errors == [
@@ -105,10 +99,7 @@ def test_mypy_compactor_extracts_error_codes_refs_and_messages():
 
 def test_mypy_compactor_applies_token_budget_to_trimmed_trace():
   stdout = '\n'.join([
-      (
-          'src/google/adk/agents/agent.py:10:1: '
-          'error: Item one message [misc]'
-      ),
+      'src/google/adk/agents/agent.py:10:1: error: Item one message [misc]',
       (
           'src/google/adk/agents/runner.py:22:2: '
           'error: Item two message [arg-type]'
@@ -119,11 +110,13 @@ def test_mypy_compactor_applies_token_budget_to_trimmed_trace():
       ),
   ])
 
-  compaction = MypyCompactor(token_budget=20).compact(_tool_event(stdout=stdout))
+  compaction = MypyCompactor(token_budget=20).compact(
+      _tool_event(stdout=stdout)
+  )
 
   assert compaction is not None
   assert len(compaction.trimmed_trace) < 3
-  assert compaction.trimmed_trace == [] or compaction.trimmed_trace[-1].startswith(
-      'src/google/adk/agents/state.py'
-  )
+  assert compaction.trimmed_trace == [] or compaction.trimmed_trace[
+      -1
+  ].startswith('src/google/adk/agents/state.py')
   assert compaction.stats.compact_tokens_est <= 20

@@ -52,15 +52,17 @@ def test_registry_falls_back_to_generic_compactor_for_unknown_command():
 def test_registry_uses_pytest_compactor_for_pytest_commands_by_default():
   registry = ToolRunCompactorRegistry()
 
-  assert isinstance(registry.get_compactor('python -m pytest -q'),
-                     PytestCompactor)
+  assert isinstance(
+      registry.get_compactor('python -m pytest -q'), PytestCompactor
+  )
 
 
 def test_registry_uses_mypy_compactor_for_mypy_commands_by_default():
   registry = ToolRunCompactorRegistry()
 
-  assert isinstance(registry.get_compactor('mypy src/google/adk'),
-                    MypyCompactor)
+  assert isinstance(
+      registry.get_compactor('mypy src/google/adk'), MypyCompactor
+  )
 
 
 def test_registry_uses_ruff_compactor_for_ruff_and_flake8_by_default():

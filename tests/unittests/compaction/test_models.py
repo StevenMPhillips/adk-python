@@ -16,8 +16,8 @@ import json
 
 from google.adk.compaction.models import CompactionStats
 from google.adk.compaction.models import Decision
-from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import FileLineRef
 from google.adk.compaction.models import HunkSummary
 from google.adk.compaction.models import Observation
@@ -88,14 +88,12 @@ def test_patch_compaction_json_round_trip_supports_alias_validation():
       'eventId': 'evt-2',
       'compactionVersion': 1,
       'filesChanged': ['src/google/adk/compaction/models.py'],
-      'hunks': [
-          {
-              'path': 'src/google/adk/compaction/models.py',
-              'anchorBefore': 'class Existing:',
-              'anchorAfter': 'class Added:',
-              'snippet': '+class Added:\n+  pass',
-          }
-      ],
+      'hunks': [{
+          'path': 'src/google/adk/compaction/models.py',
+          'anchorBefore': 'class Existing:',
+          'anchorAfter': 'class Added:',
+          'snippet': '+class Added:\n+  pass',
+      }],
       'semanticTags': ['refactor', 'schema'],
       'stats': {
           'rawTokensEst': 80,
@@ -159,8 +157,7 @@ def test_observation_json_round_trip_uses_camel_case_aliases():
   assert 'learnedConstraints' in payload_dict
   assert payload_dict['decisions'][0]['kind'] == 'explicit'
   assert (
-      payload_dict['openQuestions'][0]['evidenceRefs'][0]['refType']
-      == 'event'
+      payload_dict['openQuestions'][0]['evidenceRefs'][0]['refType'] == 'event'
   )
 
 
@@ -170,24 +167,18 @@ def test_reflection_json_round_trip_supports_alias_validation():
       'sessionId': 'session-1',
       'coversObservationIds': ['obs-1', 'obs-2'],
       'text': 'Refined strategy after repeated parser errors.',
-      'stableFacts': [
-          {
-              'text': 'Alias parsing is stable for known keys.',
-              'evidenceRefs': [{'refType': 'event', 'refId': 'evt-2'}],
-          }
-      ],
-      'recurringFailures': [
-          {
-              'text': 'Unknown fields fail with ValidationError.',
-              'evidenceRefs': [{'refType': 'event', 'refId': 'evt-3'}],
-          }
-      ],
-      'strategyUpdates': [
-          {
-              'text': 'Preserve strict extra field validation.',
-              'evidenceRefs': [{'refType': 'event', 'refId': 'evt-4'}],
-          }
-      ],
+      'stableFacts': [{
+          'text': 'Alias parsing is stable for known keys.',
+          'evidenceRefs': [{'refType': 'event', 'refId': 'evt-2'}],
+      }],
+      'recurringFailures': [{
+          'text': 'Unknown fields fail with ValidationError.',
+          'evidenceRefs': [{'refType': 'event', 'refId': 'evt-3'}],
+      }],
+      'strategyUpdates': [{
+          'text': 'Preserve strict extra field validation.',
+          'evidenceRefs': [{'refType': 'event', 'refId': 'evt-4'}],
+      }],
       'evidenceRefs': [{'refType': 'event', 'refId': 'evt-1'}],
   }
 
@@ -210,36 +201,26 @@ def test_task_state_anchor_json_round_trip_supports_alias_validation():
       'sessionId': 'session-9',
       'stateVersion': 1,
       'objective': 'Stabilize observational compaction output.',
-      'constraints': [
-          {
-              'text': 'Keep schema strict with extra=forbid.',
-              'evidenceRefs': [{'refType': 'event', 'refId': 'evt-5'}],
-          }
-      ],
-      'hypotheses': [
-          {
-              'text': 'Evidence-linked items reduce hallucinations.',
-              'evidenceRefs': [{'refType': 'event', 'refId': 'evt-6'}],
-          }
-      ],
-      'knownFailures': [
-          {
-              'text': 'Missing aliases can break JSON consumers.',
-              'evidenceRefs': [{'refType': 'event', 'refId': 'evt-7'}],
-          }
-      ],
-      'currentPlan': [
-          {
-              'text': 'Add model classes and round-trip tests.',
-              'evidenceRefs': [{'refType': 'event', 'refId': 'evt-8'}],
-          }
-      ],
-      'nextSteps': [
-          {
-              'text': 'Run focused compaction model tests.',
-              'evidenceRefs': [{'refType': 'event', 'refId': 'evt-9'}],
-          }
-      ],
+      'constraints': [{
+          'text': 'Keep schema strict with extra=forbid.',
+          'evidenceRefs': [{'refType': 'event', 'refId': 'evt-5'}],
+      }],
+      'hypotheses': [{
+          'text': 'Evidence-linked items reduce hallucinations.',
+          'evidenceRefs': [{'refType': 'event', 'refId': 'evt-6'}],
+      }],
+      'knownFailures': [{
+          'text': 'Missing aliases can break JSON consumers.',
+          'evidenceRefs': [{'refType': 'event', 'refId': 'evt-7'}],
+      }],
+      'currentPlan': [{
+          'text': 'Add model classes and round-trip tests.',
+          'evidenceRefs': [{'refType': 'event', 'refId': 'evt-8'}],
+      }],
+      'nextSteps': [{
+          'text': 'Run focused compaction model tests.',
+          'evidenceRefs': [{'refType': 'event', 'refId': 'evt-9'}],
+      }],
       'lastUpdatedSeq': 42,
   }
 

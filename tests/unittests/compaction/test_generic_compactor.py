@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from google.genai import types
 from google.adk.compaction.compactors.generic import GenericToolRunCompactor
 from google.adk.events.event import Event
+from google.genai import types
 
 
 def _tool_event(response: dict[str, object]) -> Event:

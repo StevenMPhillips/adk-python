@@ -45,13 +45,13 @@ from .artifacts.base_artifact_service import BaseArtifactService
 from .artifacts.in_memory_artifact_service import InMemoryArtifactService
 from .auth.credential_service.base_credential_service import BaseCredentialService
 from .code_executors.built_in_code_executor import BuiltInCodeExecutor
+from .compaction.config import HybridEventsCompactionConfig
 from .errors.session_not_found_error import SessionNotFoundError
 from .events.event import Event
 from .events.event import EventActions
 from .flows.llm_flows import contents
 from .flows.llm_flows.functions import find_event_by_function_call_id
 from .flows.llm_flows.functions import find_matching_function_call
-from .compaction.config import HybridEventsCompactionConfig
 from .memory.base_memory_service import BaseMemoryService
 from .memory.in_memory_memory_service import InMemoryMemoryService
 from .platform.thread import create_thread

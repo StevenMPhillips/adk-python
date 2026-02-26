@@ -20,15 +20,13 @@ from google.adk.compaction.compactors.patch_compactor import PatchCompactor
 from google.adk.compaction.compactors.registry import ToolRunCompactorRegistry
 from google.adk.compaction.config import HybridEventsCompactionConfig
 from google.adk.compaction.models import Decision
-from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import Observation
 from google.adk.compaction.models import TaskStateAnchor
 from google.adk.compaction.rehydration import RehydrationExecutor
 from google.adk.compaction.rehydration import RetrievalQuery
-from google.adk.compaction.storage.in_memory_compaction_service import (
-    InMemoryCompactionService,
-)
+from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 from google.adk.compaction.writers.observation_writer import ObservationWriter
 from google.adk.compaction.writers.observation_writer import RawTurn
 from google.adk.compaction.writers.task_state_updater import TaskStateUpdater
@@ -229,8 +227,7 @@ def _text_from_event(event) -> str:
 
 
 @pytest.mark.asyncio
-async def test_runner_creates_deterministic_artifacts_for_multi_turn_tool_runs(
-):
+async def test_runner_creates_deterministic_artifacts_for_multi_turn_tool_runs():
   tool = FunctionTool(func=_run_shell)
   llm_responses = [
       testing_utils.LlmResponse(

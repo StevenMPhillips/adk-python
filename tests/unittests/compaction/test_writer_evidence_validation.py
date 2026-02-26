@@ -17,22 +17,19 @@ import unittest
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
-from pydantic import ValidationError
-
 from google.adk.compaction.models import Decision
-from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import Observation
 from google.adk.compaction.models import TaskStateAnchor
-from google.adk.compaction.storage.in_memory_compaction_service import (
-    InMemoryCompactionService,
-)
+from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 from google.adk.compaction.writers.observation_writer import ObservationWriter
 from google.adk.compaction.writers.observation_writer import RawTurn
 from google.adk.compaction.writers.reflection_writer import ReflectionWriter
 from google.adk.models.base_llm import BaseLlm
 from google.genai.types import Content
 from google.genai.types import Part
+from pydantic import ValidationError
 import pytest
 
 
@@ -74,11 +71,25 @@ def _sample_task_state() -> TaskStateAnchor:
       session_id='session-1',
       state_version=1,
       objective='Harden evidence validation behavior.',
-      constraints=[_sample_item('Use cited evidence only.', _sample_event_ref('evt-1'))],
-      hypotheses=[_sample_item('Malformed refs should fail fast.', _sample_event_ref('evt-1'))],
-      known_failures=[_sample_item('Silent acceptance causes drift.', _sample_event_ref('evt-1'))],
-      current_plan=[_sample_item('Add failure-mode tests.', _sample_event_ref('evt-1'))],
-      next_steps=[_sample_item('Validate both writers.', _sample_event_ref('evt-1'))],
+      constraints=[
+          _sample_item('Use cited evidence only.', _sample_event_ref('evt-1'))
+      ],
+      hypotheses=[
+          _sample_item(
+              'Malformed refs should fail fast.', _sample_event_ref('evt-1')
+          )
+      ],
+      known_failures=[
+          _sample_item(
+              'Silent acceptance causes drift.', _sample_event_ref('evt-1')
+          )
+      ],
+      current_plan=[
+          _sample_item('Add failure-mode tests.', _sample_event_ref('evt-1'))
+      ],
+      next_steps=[
+          _sample_item('Validate both writers.', _sample_event_ref('evt-1'))
+      ],
       last_updated_seq=20,
   )
 
@@ -140,20 +151,20 @@ class TestWriterEvidenceValidation(unittest.IsolatedAsyncioTestCase):
         compaction_service=self.compaction_service,
     )
 
-  async def test_observation_writer_rejects_malformed_evidence_ref_structure(self):
+  async def test_observation_writer_rejects_malformed_evidence_ref_structure(
+      self,
+  ):
     invalid_json = json.dumps({
         'observationId': 'obs-generated',
         'sessionId': 'placeholder',
         'startSeq': 0,
         'endSeq': 0,
         'text': 'Malformed decision evidence ref.',
-        'decisions': [
-            {
-                'text': 'Missing refId should fail model validation.',
-                'kind': 'explicit',
-                'evidenceRefs': [{'refType': 'event'}],
-            }
-        ],
+        'decisions': [{
+            'text': 'Missing refId should fail model validation.',
+            'kind': 'explicit',
+            'evidenceRefs': [{'refType': 'event'}],
+        }],
         'learnedConstraints': [],
         'openQuestions': [],
         'nextSteps': [],
@@ -170,20 +181,20 @@ class TestWriterEvidenceValidation(unittest.IsolatedAsyncioTestCase):
           episode_closed=True,
       )
 
-  async def test_observation_writer_rejects_unknown_top_level_evidence_ref(self):
+  async def test_observation_writer_rejects_unknown_top_level_evidence_ref(
+      self,
+  ):
     invalid_json = json.dumps({
         'observationId': 'obs-generated',
         'sessionId': 'placeholder',
         'startSeq': 0,
         'endSeq': 0,
         'text': 'Top-level evidence refs must be allowed.',
-        'decisions': [
-            {
-                'text': 'This decision cites a valid ref.',
-                'kind': 'inferred',
-                'evidenceRefs': [{'refType': 'event', 'refId': 'evt-1'}],
-            }
-        ],
+        'decisions': [{
+            'text': 'This decision cites a valid ref.',
+            'kind': 'inferred',
+            'evidenceRefs': [{'refType': 'event', 'refId': 'evt-1'}],
+        }],
         'learnedConstraints': [],
         'openQuestions': [],
         'nextSteps': [],
@@ -209,12 +220,10 @@ class TestWriterEvidenceValidation(unittest.IsolatedAsyncioTestCase):
         'sessionId': 'placeholder',
         'coversObservationIds': ['obs-9', 'obs-10', 'obs-11', 'obs-12'],
         'text': 'Malformed evidenceRefs field type.',
-        'stableFacts': [
-            {
-                'text': 'This field uses invalid evidenceRefs shape.',
-                'evidenceRefs': 'obs-10',
-            }
-        ],
+        'stableFacts': [{
+            'text': 'This field uses invalid evidenceRefs shape.',
+            'evidenceRefs': 'obs-10',
+        }],
         'recurringFailures': [],
         'strategyUpdates': [],
         'evidenceRefs': [{'refType': 'observation', 'refId': 'obs-10'}],
@@ -233,12 +242,10 @@ class TestWriterEvidenceValidation(unittest.IsolatedAsyncioTestCase):
         'sessionId': 'placeholder',
         'coversObservationIds': ['obs-9', 'obs-10', 'obs-11', 'obs-12'],
         'text': 'Unknown top-level observation ref should fail.',
-        'stableFacts': [
-            {
-                'text': 'Use valid per-item evidence.',
-                'evidenceRefs': [{'refType': 'observation', 'refId': 'obs-10'}],
-            }
-        ],
+        'stableFacts': [{
+            'text': 'Use valid per-item evidence.',
+            'evidenceRefs': [{'refType': 'observation', 'refId': 'obs-10'}],
+        }],
         'recurringFailures': [],
         'strategyUpdates': [],
         'evidenceRefs': [{'refType': 'observation', 'refId': 'obs-unknown'}],

@@ -18,8 +18,8 @@ from .assembly import HybridPromptAssembler
 from .config import HybridEventsCompactionConfig
 from .models import CompactionStats
 from .models import Decision
-from .models import EvidenceRef
 from .models import EvidencedItem
+from .models import EvidenceRef
 from .models import FileLineRef
 from .models import HunkSummary
 from .models import Observation

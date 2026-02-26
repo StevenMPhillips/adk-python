@@ -24,12 +24,12 @@ from urllib.parse import urlparse
 
 import aiosqlite
 
-from .base_compaction_service import BaseCompactionService
 from ..models import Observation
 from ..models import PatchCompaction
 from ..models import Reflection
 from ..models import TaskStateAnchor
 from ..models import ToolRunCompaction
+from .base_compaction_service import BaseCompactionService
 
 PRAGMA_FOREIGN_KEYS = 'PRAGMA foreign_keys = ON'
 
@@ -122,16 +122,23 @@ CREATE TABLE IF NOT EXISTS patch_file_paths (
 """
 
 CREATE_INDEX_SQL = (
-    'CREATE INDEX IF NOT EXISTS idx_tool_run_error_signature '
-    'ON tool_run_error_signatures(signature);',
-    'CREATE INDEX IF NOT EXISTS idx_tool_run_file_path '
-    'ON tool_run_file_paths(path);',
-    'CREATE INDEX IF NOT EXISTS idx_patch_file_path '
-    'ON patch_file_paths(path);',
-    'CREATE INDEX IF NOT EXISTS idx_observations_session_seq '
-    'ON observations(session_id, start_seq, end_seq);',
-    'CREATE INDEX IF NOT EXISTS idx_reflections_session_created '
-    'ON reflections(session_id, created_at);',
+    (
+        'CREATE INDEX IF NOT EXISTS idx_tool_run_error_signature '
+        'ON tool_run_error_signatures(signature);'
+    ),
+    (
+        'CREATE INDEX IF NOT EXISTS idx_tool_run_file_path '
+        'ON tool_run_file_paths(path);'
+    ),
+    'CREATE INDEX IF NOT EXISTS idx_patch_file_path ON patch_file_paths(path);',
+    (
+        'CREATE INDEX IF NOT EXISTS idx_observations_session_seq '
+        'ON observations(session_id, start_seq, end_seq);'
+    ),
+    (
+        'CREATE INDEX IF NOT EXISTS idx_reflections_session_created '
+        'ON reflections(session_id, created_at);'
+    ),
 )
 
 MIGRATIONS = {
@@ -404,7 +411,9 @@ class SqliteCompactionService(BaseCompactionService):
 
     async with self._get_db_connection() as db:
       rows = await db.execute_fetchall(query, params)
-    return [Observation.model_validate_json(row['observation_json']) for row in rows]
+    return [
+        Observation.model_validate_json(row['observation_json']) for row in rows
+    ]
 
   async def get_latest_reflection(self, session_id: str) -> Reflection | None:
     await self._ensure_schema()
@@ -556,7 +565,9 @@ class SqliteCompactionService(BaseCompactionService):
     try:
       return int(row['value'])
     except ValueError as e:
-      raise RuntimeError('Invalid schema version value in metadata table.') from e
+      raise RuntimeError(
+          'Invalid schema version value in metadata table.'
+      ) from e
 
   async def _metadata_table_exists(self, db: aiosqlite.Connection) -> bool:
     async with db.execute(

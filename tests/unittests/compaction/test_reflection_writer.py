@@ -17,14 +17,12 @@ from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
 from google.adk.compaction.models import Decision
-from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
 from google.adk.compaction.models import Observation
 from google.adk.compaction.models import Reflection
 from google.adk.compaction.models import TaskStateAnchor
-from google.adk.compaction.storage.in_memory_compaction_service import (
-    InMemoryCompactionService,
-)
+from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 from google.adk.compaction.writers.reflection_writer import ReflectionWriter
 from google.adk.models.base_llm import BaseLlm
 from google.adk.models.llm_request import LlmRequest
