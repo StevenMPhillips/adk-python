@@ -33,6 +33,8 @@ class TaskStateUpdater:
   """Updates and persists compact task-state anchors."""
 
   _DEFAULT_TASK_STATE_TOKEN_BUDGET = 200
+  _MIN_OBJECTIVE_WORDS = 5
+  _OBJECTIVE_TRIM_WORDS = 2
 
   def __init__(
       self,
@@ -333,11 +335,30 @@ class TaskStateUpdater:
       if capped_state.constraints:
         capped_state.constraints.pop(0)
         continue
-      objective_words = capped_state.objective.split()
-      if len(objective_words) <= 3:
+      truncated_objective = self._truncate_objective(capped_state.objective)
+      if truncated_objective == capped_state.objective:
         break
-      capped_state.objective = ' '.join(objective_words[:-1])
+      capped_state.objective = truncated_objective
     return capped_state
+
+  def _truncate_objective(self, objective: str) -> str:
+    normalized_objective = objective.strip()
+    if not normalized_objective:
+      return objective
+
+    if normalized_objective.endswith('...'):
+      normalized_objective = normalized_objective[:-3].rstrip()
+
+    objective_words = normalized_objective.split()
+    if len(objective_words) <= self._MIN_OBJECTIVE_WORDS:
+      return objective
+
+    trimmed_word_count = max(
+        self._MIN_OBJECTIVE_WORDS,
+        len(objective_words) - self._OBJECTIVE_TRIM_WORDS,
+    )
+    truncated_words = objective_words[:trimmed_word_count]
+    return f"{' '.join(truncated_words)}..."
 
   def _estimate_tokens(self, task_state: TaskStateAnchor) -> int:
     return max(1, len(task_state.model_dump_json(by_alias=True)) // 4)

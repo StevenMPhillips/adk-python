@@ -89,16 +89,16 @@ def _enforce_token_budget(
       > token_budget
   ):
     if snippets:
-      snippets.pop(0)
+      snippets.pop()
       continue
     if trace:
-      trace.pop(0)
+      trace.pop()
       continue
     if errors:
-      errors.pop(0)
+      errors.pop()
       continue
     if signatures:
-      signatures.pop(0)
+      signatures.pop()
       continue
     break
 

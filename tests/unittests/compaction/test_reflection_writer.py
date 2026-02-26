@@ -119,8 +119,8 @@ class TestReflectionWriter(unittest.IsolatedAsyncioTestCase):
         compaction_service=self.compaction_service,
     )
 
-  def test_should_write_reflection_when_count_exceeds_threshold(self):
-    assert not self.writer.should_write_reflection(
+  def test_should_write_reflection_when_count_reaches_threshold(self):
+    assert self.writer.should_write_reflection(
         recent_observations=_sample_observations(10)
     )
     assert self.writer.should_write_reflection(

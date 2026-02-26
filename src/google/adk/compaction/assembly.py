@@ -130,7 +130,7 @@ class HybridPromptAssembler:
         max_compactions=self._compactions_count,
         remaining_tokens=remaining_tokens,
     )
-    _append_text_layer(
+    remaining_tokens = _append_text_layer(
         prompt_contents=prompt_contents,
         remaining_tokens=remaining_tokens,
         title='Recent Compactions',

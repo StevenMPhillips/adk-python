@@ -109,6 +109,9 @@ def test_ruff_compactor_applies_token_budget_to_trimmed_trace():
   assert compaction is not None
   assert len(compaction.trimmed_trace) < 3
   assert compaction.trimmed_trace == [] or compaction.trimmed_trace[
-      -1
-  ].startswith('src/google/adk/c.py')
+      0
+  ].startswith('src/google/adk/a.py')
+  assert compaction.error_signatures == [] or compaction.error_signatures[
+      0
+  ] == 'ruff::F401::src/google/adk/a.py'
   assert compaction.stats.compact_tokens_est <= 16

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from google.adk.compaction.assembly import HybridPromptAssembler
+import inspect
 from google.adk.compaction.models import CompactionStats
 from google.adk.compaction.models import Decision
 from google.adk.compaction.models import EvidencedItem
@@ -344,3 +345,9 @@ async def test_hybrid_prompt_assembly_reduces_prompt_tokens_over_20_turn_session
 
   assert len(events) >= 20
   assert hybrid_tokens < baseline_tokens
+
+
+def test_hybrid_prompt_assembly_updates_remaining_tokens_for_compactions_layer():
+  assemble_source = inspect.getsource(HybridPromptAssembler.assemble)
+  assert "remaining_tokens = _append_text_layer(" in assemble_source
+  assert "title='Recent Compactions'" in assemble_source

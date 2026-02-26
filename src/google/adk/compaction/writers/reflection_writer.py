@@ -59,7 +59,7 @@ class ReflectionWriter:
       self, *, recent_observations: Sequence[Observation]
   ) -> bool:
     """Returns whether reflection generation should run for this window."""
-    return len(recent_observations) > self._observation_count_threshold
+    return len(recent_observations) >= self._observation_count_threshold
 
   async def maybe_write_reflection(
       self,

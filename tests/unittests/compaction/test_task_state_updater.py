@@ -265,3 +265,30 @@ class TestTaskStateUpdater(unittest.IsolatedAsyncioTestCase):
 
     token_estimate = len(updated_state.model_dump_json(by_alias=True)) // 4
     assert token_estimate <= 70
+
+  def test_apply_token_budget_truncates_objective_with_ellipsis(self):
+    capped_updater = TaskStateUpdater(
+        compaction_service=self.compaction_service,
+        task_state_token_budget=50,
+    )
+    task_state = TaskStateAnchor(
+        session_id='session-1',
+        state_version=2,
+        objective=(
+            'Fix the flaky observation writer regression while preserving '
+            'evidence grounded updates and deterministic ordering guarantees'
+        ),
+        constraints=[],
+        hypotheses=[],
+        known_failures=[],
+        current_plan=[],
+        next_steps=[],
+        last_updated_seq=9,
+    )
+
+    capped_state = capped_updater._apply_token_budget(task_state)
+
+    assert capped_state.objective.endswith('...')
+    assert len(capped_state.objective[:-3].split()) >= 5
+    token_estimate = len(capped_state.model_dump_json(by_alias=True)) // 4
+    assert token_estimate <= 50
