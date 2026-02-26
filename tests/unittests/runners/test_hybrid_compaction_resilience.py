@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from google.adk.agents.llm_agent import LlmAgent
+from google.adk.agents.run_config import RunConfig
 from google.adk.apps.app import App
 from google.adk.apps.app import EventsCompactionConfig
 from google.adk.compaction.compactors.patch_compactor import PatchCompactor
@@ -73,6 +74,27 @@ class _FailingCompactionService(InMemoryCompactionService):
     if self.fail_get_task_state:
       raise RuntimeError('get_task_state failed')
     return await super().get_task_state(session_id)
+
+
+class _NoOpCheckCompactionService(InMemoryCompactionService):
+
+  def __init__(self):
+    super().__init__()
+    self.save_observation_calls = 0
+    self.save_reflection_calls = 0
+    self.save_task_state_calls = 0
+
+  async def save_observation(self, observation) -> None:
+    self.save_observation_calls += 1
+    await super().save_observation(observation)
+
+  async def save_reflection(self, reflection) -> None:
+    self.save_reflection_calls += 1
+    await super().save_reflection(reflection)
+
+  async def save_task_state(self, task_state) -> None:
+    self.save_task_state_calls += 1
+    await super().save_task_state(task_state)
 
 
 @pytest.mark.asyncio
@@ -164,3 +186,133 @@ async def test_non_hybrid_compaction_failure_remains_fail_fast(monkeypatch):
 
   with pytest.raises(RuntimeError, match='non-hybrid compaction failed'):
     await runner.run_async('trigger non-hybrid compaction')
+
+
+@pytest.mark.asyncio
+async def test_observational_runtime_not_initialized_when_flag_disabled(
+    monkeypatch,
+):
+  model = testing_utils.MockModel.create(['response'])
+  compaction_service = _NoOpCheckCompactionService()
+  app = App(
+      name='observational_runtime_disabled_app',
+      root_agent=LlmAgent(name='agent', model=model),
+      events_compaction_config=HybridEventsCompactionConfig(
+          compaction_service=compaction_service,
+          tool_run_compactor_registry=ToolRunCompactorRegistry(),
+          patch_compactor=PatchCompactor(),
+          compaction_interval=999,
+          overlap_size=0,
+          enable_observational_memory=False,
+      ),
+  )
+  runner = testing_utils.InMemoryRunner(app=app)
+
+  construction_calls = {'observation': 0, 'reflection': 0, 'task_state': 0}
+
+  class _ObservationWriterStub:
+
+    def __init__(self, **_kwargs):
+      construction_calls['observation'] += 1
+
+  class _ReflectionWriterStub:
+
+    def __init__(self, **_kwargs):
+      construction_calls['reflection'] += 1
+
+  class _TaskStateUpdaterStub:
+
+    def __init__(self, **_kwargs):
+      construction_calls['task_state'] += 1
+
+  monkeypatch.setattr(
+      'google.adk.runners.ObservationWriter', _ObservationWriterStub
+  )
+  monkeypatch.setattr(
+      'google.adk.runners.ReflectionWriter', _ReflectionWriterStub
+  )
+  monkeypatch.setattr(
+      'google.adk.runners.TaskStateUpdater', _TaskStateUpdaterStub
+  )
+
+  events = await runner.run_async('run without observational runtime')
+
+  assert 'response' in _event_texts(events)
+  assert construction_calls == {
+      'observation': 0,
+      'reflection': 0,
+      'task_state': 0,
+  }
+
+
+@pytest.mark.asyncio
+async def test_observational_runtime_initializes_when_flag_enabled_and_is_noop(
+    monkeypatch,
+):
+  model = testing_utils.MockModel.create(['response one', 'response two'])
+  compaction_service = _NoOpCheckCompactionService()
+  app = App(
+      name='observational_runtime_enabled_app',
+      root_agent=LlmAgent(name='agent', model=model),
+      events_compaction_config=HybridEventsCompactionConfig(
+          compaction_service=compaction_service,
+          tool_run_compactor_registry=ToolRunCompactorRegistry(),
+          patch_compactor=PatchCompactor(),
+          compaction_interval=999,
+          overlap_size=0,
+          enable_observational_memory=True,
+      ),
+  )
+  runner = testing_utils.InMemoryRunner(app=app)
+
+  construction_calls = {'observation': 0, 'reflection': 0, 'task_state': 0}
+
+  class _ObservationWriterStub:
+
+    def __init__(self, **_kwargs):
+      construction_calls['observation'] += 1
+
+  class _ReflectionWriterStub:
+
+    def __init__(self, **_kwargs):
+      construction_calls['reflection'] += 1
+
+  class _TaskStateUpdaterStub:
+
+    def __init__(self, **_kwargs):
+      construction_calls['task_state'] += 1
+
+  monkeypatch.setattr(
+      'google.adk.runners.ObservationWriter', _ObservationWriterStub
+  )
+  monkeypatch.setattr(
+      'google.adk.runners.ReflectionWriter', _ReflectionWriterStub
+  )
+  monkeypatch.setattr(
+      'google.adk.runners.TaskStateUpdater', _TaskStateUpdaterStub
+  )
+
+  first_events = await runner.run_async('first message')
+  assert 'response one' in _event_texts(first_events)
+
+  session = runner.session
+  second_events = []
+  async for event in runner.runner.run_async(
+      user_id=session.user_id,
+      session_id=session.id,
+      new_message=testing_utils.UserContent('second message'),
+      run_config=RunConfig(
+          custom_metadata={'trigger_observational_memory_runtime': True}
+      ),
+  ):
+    second_events.append(event)
+
+  assert 'response two' in _event_texts(second_events)
+  assert construction_calls == {
+      'observation': 1,
+      'reflection': 1,
+      'task_state': 1,
+  }
+  assert compaction_service.save_observation_calls == 0
+  assert compaction_service.save_reflection_calls == 0
+  assert compaction_service.save_task_state_calls == 0

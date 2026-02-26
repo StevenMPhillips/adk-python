@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import inspect
 import logging
 from pathlib import Path
@@ -46,6 +47,9 @@ from .artifacts.in_memory_artifact_service import InMemoryArtifactService
 from .auth.credential_service.base_credential_service import BaseCredentialService
 from .code_executors.built_in_code_executor import BuiltInCodeExecutor
 from .compaction.config import HybridEventsCompactionConfig
+from .compaction.writers.observation_writer import ObservationWriter
+from .compaction.writers.reflection_writer import ReflectionWriter
+from .compaction.writers.task_state_updater import TaskStateUpdater
 from .errors.session_not_found_error import SessionNotFoundError
 from .events.event import Event
 from .events.event import EventActions
@@ -66,6 +70,15 @@ from .utils._debug_output import print_event
 from .utils.context_utils import Aclosing
 
 logger = logging.getLogger('google_adk.' + __name__)
+
+
+@dataclass(frozen=True)
+class _ObservationalMemoryRuntime:
+  """Runtime bundle for observational memory writer components."""
+
+  observation_writer: ObservationWriter
+  reflection_writer: ReflectionWriter
+  task_state_updater: TaskStateUpdater
 
 
 def _is_tool_call_or_response(event: Event) -> bool:
@@ -240,6 +253,9 @@ class Runner:
     ) = self._infer_agent_origin(self.agent)
     self._app_name_alignment_hint: Optional[str] = None
     self._enforce_app_name_alignment()
+    self._observational_memory_runtime_by_session_id: dict[
+        str, _ObservationalMemoryRuntime
+    ] = {}
 
   def _validate_runner_params(
       self,
@@ -628,6 +644,10 @@ class Runner:
         ) as agen:
           async for event in agen:
             yield event
+        await self._maybe_run_observational_memory_runtime(
+            session=session,
+            invocation_context=invocation_context,
+        )
         # Run compaction after all events are yielded from the agent.
         # (We don't compact in the middle of an invocation, we only compact at
         # the end of an invocation.)
@@ -812,6 +832,102 @@ class Runner:
     if not config.enable_deterministic_compaction:
       return None
     return config
+
+  def _get_observational_memory_compaction_config(
+      self,
+  ) -> HybridEventsCompactionConfig | None:
+    """Returns enabled observational-memory config, if configured."""
+    config = self._get_hybrid_events_compaction_config()
+    if config is None or not config.enable_observational_memory:
+      return None
+    return config
+
+  def _get_or_create_observational_memory_runtime(
+      self, session: Session
+  ) -> _ObservationalMemoryRuntime | None:
+    """Lazily creates observational-memory runtime for one session."""
+    config = self._get_observational_memory_compaction_config()
+    if config is None:
+      return None
+
+    session_id = session.id
+    if session_id in self._observational_memory_runtime_by_session_id:
+      return self._observational_memory_runtime_by_session_id[session_id]
+
+    canonical_model = getattr(self.agent, 'canonical_model', None)
+    if canonical_model is None:
+      logger.warning(
+          'Skipping observational memory runtime initialization because '
+          'root agent does not expose canonical_model. app_name=%s',
+          self.app_name,
+      )
+      return None
+
+    try:
+      llm = canonical_model
+      runtime = _ObservationalMemoryRuntime(
+          observation_writer=ObservationWriter(
+              llm=llm,
+              compaction_service=config.compaction_service,
+          ),
+          reflection_writer=ReflectionWriter(
+              llm=llm,
+              compaction_service=config.compaction_service,
+          ),
+          task_state_updater=TaskStateUpdater(
+              llm=llm,
+              compaction_service=config.compaction_service,
+          ),
+      )
+    except Exception:
+      logger.exception(
+          'Failed to initialize observational memory runtime for '
+          'session_id=%s.',
+          session_id,
+      )
+      return None
+
+    self._observational_memory_runtime_by_session_id[session_id] = runtime
+    return runtime
+
+  def _should_trigger_observational_memory_runtime(
+      self, invocation_context: InvocationContext
+  ) -> bool:
+    """Checks if explicit trigger metadata requested runtime execution."""
+    run_config = invocation_context.run_config
+    if not run_config or not run_config.custom_metadata:
+      return False
+    return bool(
+        run_config.custom_metadata.get('trigger_observational_memory_runtime')
+    )
+
+  async def _maybe_run_observational_memory_runtime(
+      self,
+      *,
+      session: Session,
+      invocation_context: InvocationContext,
+  ) -> None:
+    """First-slice hook for observational-memory runtime integration.
+
+    This intentionally keeps runtime execution as a no-op while wiring lazy
+    writer initialization behind config and trigger gates.
+    """
+    runtime = self._get_or_create_observational_memory_runtime(session)
+    if runtime is None:
+      return
+    del runtime
+
+    if not self._should_trigger_observational_memory_runtime(
+        invocation_context
+    ):
+      return
+
+    logger.debug(
+        'Observational memory runtime trigger received for session_id=%s, '
+        'invocation_id=%s. Execution path deferred in first integration slice.',
+        session.id,
+        invocation_context.invocation_id,
+    )
 
   async def _run_deterministic_compaction_for_event(self, event: Event) -> None:
     """Runs deterministic compaction hooks for tool response events."""
