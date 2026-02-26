@@ -15,11 +15,13 @@
 """Storage services for compaction artifacts."""
 
 from .base_compaction_service import BaseCompactionService
+from .base_compaction_service import CompactionCleanupStats
 from .in_memory_compaction_service import InMemoryCompactionService
 from .sqlite_compaction_service import SqliteCompactionService
 
 __all__ = [
     'BaseCompactionService',
+    'CompactionCleanupStats',
     'InMemoryCompactionService',
     'SqliteCompactionService',
 ]

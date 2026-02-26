@@ -15,12 +15,35 @@
 from __future__ import annotations
 
 import abc
+from dataclasses import dataclass
 
 from ..models import Observation
 from ..models import PatchCompaction
 from ..models import Reflection
 from ..models import TaskStateAnchor
 from ..models import ToolRunCompaction
+
+
+@dataclass(frozen=True)
+class CompactionCleanupStats:
+  """Counts of artifacts removed by a cleanup operation."""
+
+  tool_run_compactions_deleted: int = 0
+  patch_compactions_deleted: int = 0
+  observations_deleted: int = 0
+  reflections_deleted: int = 0
+  task_states_deleted: int = 0
+
+  @property
+  def total_deleted(self) -> int:
+    """Returns the total number of deleted records across all kinds."""
+    return (
+        self.tool_run_compactions_deleted
+        + self.patch_compactions_deleted
+        + self.observations_deleted
+        + self.reflections_deleted
+        + self.task_states_deleted
+    )
 
 
 class BaseCompactionService(abc.ABC):
@@ -87,3 +110,56 @@ class BaseCompactionService(abc.ABC):
       self, path: str
   ) -> list[ToolRunCompaction | PatchCompaction]:
     """Returns compaction artifacts that reference a file path."""
+
+  async def cleanup_artifacts(
+      self,
+      *,
+      max_age_seconds: float | None = None,
+      max_records_per_kind: int | None = None,
+      session_id: str | None = None,
+      now: float | None = None,
+  ) -> CompactionCleanupStats:
+    """Applies optional retention/eviction policies and returns delete counts.
+
+    Implementations should support two policy knobs:
+    - `max_age_seconds`: remove records older than `now - max_age_seconds`.
+    - `max_records_per_kind`: keep at most this many newest records per kind.
+
+    When `session_id` is set, cleanup should scope to artifacts that are tied to
+    that session (`Observation`, `Reflection`, and `TaskStateAnchor`). Artifact
+    kinds that are not session-addressable may be ignored for session-scoped
+    cleanup.
+
+    The default implementation is a no-op to preserve backward compatibility for
+    services that do not yet implement retention controls.
+
+    Args:
+      max_age_seconds: Maximum age of retained records in seconds.
+      max_records_per_kind: Per-kind record count limit to retain.
+      session_id: Optional session scope for cleanup.
+      now: Optional current timestamp override used for deterministic cleanup.
+
+    Returns:
+      A `CompactionCleanupStats` object containing per-kind delete counts.
+    """
+    del max_age_seconds, max_records_per_kind, session_id, now
+    return CompactionCleanupStats()
+
+  async def evict_session(self, session_id: str) -> CompactionCleanupStats:
+    """Deletes all session-scoped artifacts for a single session.
+
+    This method is intended for explicit targeted eviction of one session's
+    `Observation`, `Reflection`, and `TaskStateAnchor` records.
+
+    The default implementation is a no-op to preserve backward compatibility for
+    services that do not yet implement targeted session eviction.
+
+    Args:
+      session_id: Session identifier whose session-scoped records should be
+        removed.
+
+    Returns:
+      A `CompactionCleanupStats` object containing per-kind delete counts.
+    """
+    del session_id
+    return CompactionCleanupStats()

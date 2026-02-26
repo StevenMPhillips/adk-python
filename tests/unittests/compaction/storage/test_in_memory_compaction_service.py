@@ -272,3 +272,228 @@ async def test_get_observations_filters_by_seq_range():
   assert await service.get_observations('session-1', seq_range=(4, 8)) == [
       second
   ]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_artifacts_evicts_records_by_age(monkeypatch):
+  service = InMemoryCompactionService()
+
+  timestamps = iter([100.0, 101.0, 102.0, 103.0, 104.0, 105.0])
+  monkeypatch.setattr(
+      'google.adk.compaction.storage.in_memory_compaction_service.time.time',
+      lambda: next(timestamps),
+  )
+
+  old_tool_run = ToolRunCompaction(
+      event_id='evt-old-tool',
+      compaction_version=1,
+      command='pytest',
+      exit_code=1,
+      error_signatures=['AssertionError'],
+      key_errors=[],
+      tests_failed=[],
+      file_line_refs=[],
+      trimmed_trace=[],
+      salient_snippets=[],
+      stats=_sample_stats(),
+      provenance=_sample_provenance('evt-old-tool'),
+  )
+  new_tool_run = ToolRunCompaction(
+      event_id='evt-new-tool',
+      compaction_version=1,
+      command='pytest',
+      exit_code=1,
+      error_signatures=['TypeError'],
+      key_errors=[],
+      tests_failed=[],
+      file_line_refs=[],
+      trimmed_trace=[],
+      salient_snippets=[],
+      stats=_sample_stats(),
+      provenance=_sample_provenance('evt-new-tool'),
+  )
+  old_patch = PatchCompaction(
+      event_id='evt-old-patch',
+      compaction_version=1,
+      files_changed=['src/old.py'],
+      hunks=[],
+      semantic_tags=[],
+      stats=_sample_stats(),
+      provenance=_sample_provenance('evt-old-patch'),
+  )
+  old_observation = Observation(
+      observation_id='obs-old',
+      session_id='session-1',
+      start_seq=1,
+      end_seq=1,
+      text='old',
+      decisions=[],
+      learned_constraints=[],
+      open_questions=[],
+      next_steps=[],
+      evidence_refs=[],
+  )
+  new_observation = Observation(
+      observation_id='obs-new',
+      session_id='session-1',
+      start_seq=2,
+      end_seq=2,
+      text='new',
+      decisions=[],
+      learned_constraints=[],
+      open_questions=[],
+      next_steps=[],
+      evidence_refs=[],
+  )
+  old_reflection = Reflection(
+      reflection_id='refl-old',
+      session_id='session-1',
+      covers_observation_ids=['obs-old'],
+      text='old reflection',
+      stable_facts=[],
+      recurring_failures=[],
+      strategy_updates=[],
+      evidence_refs=[],
+  )
+
+  await service.save_tool_run_compaction(old_tool_run)
+  await service.save_patch_compaction(old_patch)
+  await service.save_observation(old_observation)
+  await service.save_reflection(old_reflection)
+  await service.save_observation(new_observation)
+  await service.save_tool_run_compaction(new_tool_run)
+
+  cleanup_stats = await service.cleanup_artifacts(max_age_seconds=2, now=105.0)
+
+  assert cleanup_stats.tool_run_compactions_deleted == 1
+  assert cleanup_stats.patch_compactions_deleted == 1
+  assert cleanup_stats.observations_deleted == 1
+  assert cleanup_stats.reflections_deleted == 1
+  assert cleanup_stats.total_deleted == 4
+  assert await service.get_tool_run_compaction('evt-old-tool') is None
+  assert await service.get_tool_run_compaction('evt-new-tool') == new_tool_run
+  assert await service.get_patch_compaction('evt-old-patch') is None
+  assert await service.get_observations('session-1') == [new_observation]
+  assert await service.get_latest_reflection('session-1') is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_artifacts_evicts_oldest_records_by_count():
+  service = InMemoryCompactionService()
+
+  tool_run_ids = ['evt-1', 'evt-2', 'evt-3']
+  for tool_run_id in tool_run_ids:
+    await service.save_tool_run_compaction(
+        ToolRunCompaction(
+            event_id=tool_run_id,
+            compaction_version=1,
+            command='pytest',
+            exit_code=1,
+            error_signatures=[tool_run_id],
+            key_errors=[],
+            tests_failed=[],
+            file_line_refs=[],
+            trimmed_trace=[],
+            salient_snippets=[],
+            stats=_sample_stats(),
+            provenance=_sample_provenance(tool_run_id),
+        )
+    )
+
+  cleanup_stats = await service.cleanup_artifacts(max_records_per_kind=2)
+
+  assert cleanup_stats.tool_run_compactions_deleted == 1
+  assert await service.get_tool_run_compaction('evt-1') is None
+  assert await service.get_tool_run_compaction('evt-2') is not None
+  assert await service.get_tool_run_compaction('evt-3') is not None
+
+
+@pytest.mark.asyncio
+async def test_evict_session_removes_only_target_session_scoped_records():
+  service = InMemoryCompactionService()
+
+  session_a_observation = Observation(
+      observation_id='obs-a',
+      session_id='session-a',
+      start_seq=1,
+      end_seq=1,
+      text='session-a',
+      decisions=[],
+      learned_constraints=[],
+      open_questions=[],
+      next_steps=[],
+      evidence_refs=[],
+  )
+  session_b_observation = Observation(
+      observation_id='obs-b',
+      session_id='session-b',
+      start_seq=1,
+      end_seq=1,
+      text='session-b',
+      decisions=[],
+      learned_constraints=[],
+      open_questions=[],
+      next_steps=[],
+      evidence_refs=[],
+  )
+  session_a_reflection = Reflection(
+      reflection_id='refl-a',
+      session_id='session-a',
+      covers_observation_ids=['obs-a'],
+      text='session-a reflection',
+      stable_facts=[],
+      recurring_failures=[],
+      strategy_updates=[],
+      evidence_refs=[],
+  )
+  session_b_reflection = Reflection(
+      reflection_id='refl-b',
+      session_id='session-b',
+      covers_observation_ids=['obs-b'],
+      text='session-b reflection',
+      stable_facts=[],
+      recurring_failures=[],
+      strategy_updates=[],
+      evidence_refs=[],
+  )
+  session_a_task_state = TaskStateAnchor(
+      session_id='session-a',
+      objective='A',
+      constraints=[],
+      hypotheses=[],
+      known_failures=[],
+      current_plan=[],
+      next_steps=[],
+      last_updated_seq=1,
+  )
+  session_b_task_state = TaskStateAnchor(
+      session_id='session-b',
+      objective='B',
+      constraints=[],
+      hypotheses=[],
+      known_failures=[],
+      current_plan=[],
+      next_steps=[],
+      last_updated_seq=1,
+  )
+
+  await service.save_observation(session_a_observation)
+  await service.save_observation(session_b_observation)
+  await service.save_reflection(session_a_reflection)
+  await service.save_reflection(session_b_reflection)
+  await service.save_task_state(session_a_task_state)
+  await service.save_task_state(session_b_task_state)
+
+  cleanup_stats = await service.evict_session('session-a')
+
+  assert cleanup_stats.observations_deleted == 1
+  assert cleanup_stats.reflections_deleted == 1
+  assert cleanup_stats.task_states_deleted == 1
+  assert await service.get_observations('session-a') == []
+  assert await service.get_latest_reflection('session-a') is None
+  assert await service.get_task_state('session-a') is None
+  assert await service.get_observations('session-b') == [session_b_observation]
+  assert (
+      await service.get_latest_reflection('session-b') == session_b_reflection
+  )
+  assert await service.get_task_state('session-b') == session_b_task_state
