@@ -83,16 +83,23 @@ class _ContentLlmRequestProcessor(BaseLlmRequestProcessor):
                 hybrid_config.rehydration_evidence_token_budget
             ),
         )
-        llm_request.contents = await assembler.assemble(
-            session_id=invocation_context.session.id,
-            events=invocation_context.session.events,
-            baseline_contents=default_contents,
-            system_instruction=(
-                llm_request.config.system_instruction
-                if isinstance(llm_request.config.system_instruction, str)
-                else None
-            ),
-        )
+        try:
+          llm_request.contents = await assembler.assemble(
+              session_id=invocation_context.session.id,
+              events=invocation_context.session.events,
+              baseline_contents=default_contents,
+              system_instruction=(
+                  llm_request.config.system_instruction
+                  if isinstance(llm_request.config.system_instruction, str)
+                  else None
+              ),
+          )
+        except Exception:
+          logger.exception(
+              'Hybrid prompt assembly failed for session_id=%s.',
+              invocation_context.session.id,
+          )
+          llm_request.contents = default_contents
     else:
       # Include current turn context only (no conversation history)
       llm_request.contents = _get_current_turn_contents(

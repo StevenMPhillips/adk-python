@@ -823,16 +823,30 @@ class Runner:
       return
 
     command = _extract_tool_command_from_event(event)
-    tool_run_compactor = config.tool_run_compactor_registry.get_compactor(command)
-    tool_run_compaction = tool_run_compactor.compact(event)
-    if tool_run_compaction is not None:
-      await config.compaction_service.save_tool_run_compaction(
-          tool_run_compaction
+    try:
+      tool_run_compactor = config.tool_run_compactor_registry.get_compactor(
+          command
+      )
+      tool_run_compaction = tool_run_compactor.compact(event)
+      if tool_run_compaction is not None:
+        await config.compaction_service.save_tool_run_compaction(
+            tool_run_compaction
+        )
+    except Exception:
+      logger.exception(
+          'Deterministic tool-run compaction failed for event_id=%s.',
+          event.id,
       )
 
-    patch_compaction = config.patch_compactor.compact(event)
-    if patch_compaction is not None:
-      await config.compaction_service.save_patch_compaction(patch_compaction)
+    try:
+      patch_compaction = config.patch_compactor.compact(event)
+      if patch_compaction is not None:
+        await config.compaction_service.save_patch_compaction(patch_compaction)
+    except Exception:
+      logger.exception(
+          'Deterministic patch compaction failed for event_id=%s.',
+          event.id,
+      )
 
   async def _append_event_with_compaction(
       self, *, session: Session, event: Event
