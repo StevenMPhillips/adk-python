@@ -55,3 +55,11 @@
 - Duration: N/A
 - Status: complete
 ---
+
+## 2026-02-25 22:47 PST - Story US-008: Integrate deterministic compaction into runner pipeline
+- Sub-agent: ses_3675048edffeYywBvC2jXOzQrW
+- Commit: 9e8831a9 (by: sub-agent)
+- Files changed: src/google/adk/compaction/__init__.py, src/google/adk/compaction/config.py, src/google/adk/runners.py, tests/unittests/compaction/test_config.py, tests/unittests/runners/test_hybrid_compaction.py
+- Duration: N/A
+- Status: complete
+---
