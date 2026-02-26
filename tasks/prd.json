@@ -176,8 +176,9 @@
         "Typecheck/lint passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "status": "complete",
+      "notes": "Implemented in commit 3804a29a"
     },
     {
       "id": "US-010",
