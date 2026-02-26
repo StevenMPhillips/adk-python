@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import sqlite3
 
+import aiosqlite
 from google.adk.compaction.models import CompactionStats
 from google.adk.compaction.models import Decision
 from google.adk.compaction.models import EvidencedItem
@@ -315,3 +317,282 @@ async def test_sqlite_service_migrates_from_metadata_version_zero(tmp_path):
   assert 'observations' in table_names
   assert 'reflections' in table_names
   assert 'task_states' in table_names
+
+
+@pytest.mark.asyncio
+async def test_save_tool_run_compaction_rolls_back_on_related_insert_failure(
+    tmp_path, monkeypatch
+):
+  db_path = tmp_path / 'compactions.db'
+  service = SqliteCompactionService(str(db_path))
+
+  original = ToolRunCompaction(
+      event_id='evt-tool-rollback',
+      compaction_version=1,
+      command='pytest',
+      exit_code=1,
+      error_signatures=['AssertionError'],
+      key_errors=[],
+      tests_failed=[],
+      file_line_refs=[FileLineRef(path='src/original.py', line=1)],
+      trimmed_trace=[],
+      salient_snippets=[],
+      stats=_sample_stats(),
+      provenance=_sample_provenance('evt-tool-rollback'),
+  )
+  await service.save_tool_run_compaction(original)
+
+  updated = ToolRunCompaction(
+      event_id='evt-tool-rollback',
+      compaction_version=1,
+      command='pytest tests/unittests',
+      exit_code=2,
+      error_signatures=['ValueError'],
+      key_errors=[],
+      tests_failed=[],
+      file_line_refs=[FileLineRef(path='src/updated.py', line=2)],
+      trimmed_trace=[],
+      salient_snippets=[],
+      stats=_sample_stats(),
+      provenance=_sample_provenance('evt-tool-rollback'),
+  )
+
+  db = await service._get_or_create_connection()
+  original_executemany = db.executemany
+
+  async def _failing_executemany(sql: str, params):
+    if 'tool_run_file_paths' in sql:
+      raise RuntimeError('forced tool_run_file_paths failure')
+    return await original_executemany(sql, params)
+
+  monkeypatch.setattr(db, 'executemany', _failing_executemany)
+
+  with pytest.raises(RuntimeError, match='forced tool_run_file_paths failure'):
+    await service.save_tool_run_compaction(updated)
+
+  assert await service.get_tool_run_compaction('evt-tool-rollback') == original
+  assert await service.query_by_error_signature('AssertionError') == [original]
+
+
+@pytest.mark.asyncio
+async def test_save_patch_compaction_rolls_back_on_path_insert_failure(
+    tmp_path, monkeypatch
+):
+  db_path = tmp_path / 'compactions.db'
+  service = SqliteCompactionService(str(db_path))
+
+  original = PatchCompaction(
+      event_id='evt-patch-rollback',
+      compaction_version=1,
+      files_changed=['src/original.py'],
+      hunks=[],
+      semantic_tags=[],
+      stats=_sample_stats(),
+      provenance=_sample_provenance('evt-patch-rollback'),
+  )
+  await service.save_patch_compaction(original)
+
+  updated = PatchCompaction(
+      event_id='evt-patch-rollback',
+      compaction_version=1,
+      files_changed=['src/updated.py'],
+      hunks=[],
+      semantic_tags=['refactor'],
+      stats=_sample_stats(),
+      provenance=_sample_provenance('evt-patch-rollback'),
+  )
+
+  db = await service._get_or_create_connection()
+  original_executemany = db.executemany
+
+  async def _failing_executemany(sql: str, params):
+    if 'patch_file_paths' in sql:
+      raise RuntimeError('forced patch_file_paths failure')
+    return await original_executemany(sql, params)
+
+  monkeypatch.setattr(db, 'executemany', _failing_executemany)
+
+  with pytest.raises(RuntimeError, match='forced patch_file_paths failure'):
+    await service.save_patch_compaction(updated)
+
+  assert await service.get_patch_compaction('evt-patch-rollback') == original
+  assert await service.query_by_file_path('src/original.py') == [original]
+
+
+@pytest.mark.asyncio
+async def test_single_row_getter_raises_clear_error_for_corrupt_json(tmp_path):
+  db_path = tmp_path / 'compactions.db'
+  service = SqliteCompactionService(str(db_path))
+
+  tool_run = ToolRunCompaction(
+      event_id='evt-corrupt-single',
+      compaction_version=1,
+      command='pytest',
+      exit_code=1,
+      error_signatures=[],
+      key_errors=[],
+      tests_failed=[],
+      file_line_refs=[],
+      trimmed_trace=[],
+      salient_snippets=[],
+      stats=_sample_stats(),
+      provenance=_sample_provenance('evt-corrupt-single'),
+  )
+  await service.save_tool_run_compaction(tool_run)
+
+  with sqlite3.connect(db_path) as conn:
+    conn.execute(
+        'UPDATE tool_run_compactions SET compaction_json=? WHERE event_id=?',
+        ('{not-valid-json', 'evt-corrupt-single'),
+    )
+    conn.commit()
+
+  with pytest.raises(RuntimeError, match='evt-corrupt-single'):
+    await service.get_tool_run_compaction('evt-corrupt-single')
+
+
+@pytest.mark.asyncio
+async def test_multi_row_queries_skip_corrupt_json_and_log_warning(
+    tmp_path, caplog
+):
+  db_path = tmp_path / 'compactions.db'
+  service = SqliteCompactionService(str(db_path))
+
+  observation = Observation(
+      observation_id='obs-valid',
+      session_id='session-1',
+      start_seq=1,
+      end_seq=1,
+      text='valid observation',
+      decisions=[],
+      learned_constraints=[],
+      open_questions=[],
+      next_steps=[],
+      evidence_refs=[],
+  )
+  await service.save_observation(observation)
+
+  tool_run = ToolRunCompaction(
+      event_id='evt-corrupt-query',
+      compaction_version=1,
+      command='pytest',
+      exit_code=1,
+      error_signatures=['AssertionError'],
+      key_errors=[],
+      tests_failed=[],
+      file_line_refs=[FileLineRef(path='src/query.py', line=3)],
+      trimmed_trace=[],
+      salient_snippets=[],
+      stats=_sample_stats(),
+      provenance=_sample_provenance('evt-corrupt-query'),
+  )
+  patch = PatchCompaction(
+      event_id='evt-valid-patch',
+      compaction_version=1,
+      files_changed=['src/query.py'],
+      hunks=[],
+      semantic_tags=[],
+      stats=_sample_stats(),
+      provenance=_sample_provenance('evt-valid-patch'),
+  )
+  await service.save_tool_run_compaction(tool_run)
+  await service.save_patch_compaction(patch)
+
+  with sqlite3.connect(db_path) as conn:
+    conn.execute(
+        """
+        INSERT INTO observations (
+          observation_id,
+          session_id,
+          start_seq,
+          end_seq,
+          observation_json,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            'obs-corrupt',
+            'session-1',
+            2,
+            2,
+            '{bad-json',
+            0.0,
+        ),
+    )
+    conn.execute(
+        'UPDATE tool_run_compactions SET compaction_json=? WHERE event_id=?',
+        ('{bad-json', 'evt-corrupt-query'),
+    )
+    conn.commit()
+
+  caplog.set_level(logging.WARNING)
+  assert await service.get_observations('session-1') == [observation]
+  assert await service.query_by_file_path('src/query.py') == [patch]
+  assert 'Skipping invalid observation JSON row in sqlite store.' in caplog.text
+  assert (
+      'Skipping invalid tool_run_compaction JSON row for record' in caplog.text
+  )
+
+
+@pytest.mark.asyncio
+async def test_sqlite_service_reuses_single_aiosqlite_connection(
+    tmp_path, monkeypatch
+):
+  db_path = tmp_path / 'compactions.db'
+  connect_call_count = 0
+  original_connect = aiosqlite.connect
+
+  async def _counting_connect(*args, **kwargs):
+    nonlocal connect_call_count
+    connect_call_count += 1
+    return await original_connect(*args, **kwargs)
+
+  monkeypatch.setattr(
+      'google.adk.compaction.storage.sqlite_compaction_service.aiosqlite.connect',
+      _counting_connect,
+  )
+  service = SqliteCompactionService(str(db_path))
+
+  tool_run = ToolRunCompaction(
+      event_id='evt-reuse-1',
+      compaction_version=1,
+      command='pytest',
+      exit_code=1,
+      error_signatures=['AssertionError'],
+      key_errors=[],
+      tests_failed=[],
+      file_line_refs=[FileLineRef(path='src/reuse.py', line=1)],
+      trimmed_trace=[],
+      salient_snippets=[],
+      stats=_sample_stats(),
+      provenance=_sample_provenance('evt-reuse-1'),
+  )
+
+  await service.save_tool_run_compaction(tool_run)
+  await service.get_tool_run_compaction('evt-reuse-1')
+  await service.query_by_error_signature('AssertionError')
+
+  assert connect_call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_is_migration_needed_async_matches_sync_api(tmp_path):
+  missing_db = SqliteCompactionService(str(tmp_path / 'missing.db'))
+  assert missing_db.is_migration_needed() is False
+  assert await missing_db.is_migration_needed_async() is False
+
+  db_path = tmp_path / 'compactions.db'
+  with sqlite3.connect(db_path) as conn:
+    conn.execute(
+        'CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)'
+    )
+    conn.execute(
+        'INSERT INTO metadata (key, value) VALUES (?, ?)',
+        (SCHEMA_VERSION_KEY, '0'),
+    )
+    conn.commit()
+
+  service = SqliteCompactionService(str(db_path))
+  assert service.is_migration_needed() is True
+  assert await service.is_migration_needed_async() is True

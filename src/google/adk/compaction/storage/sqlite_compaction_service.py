@@ -16,13 +16,16 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import logging
 import os
 import sqlite3
 import time
+from typing import TypeVar
 from urllib.parse import unquote
 from urllib.parse import urlparse
 
 import aiosqlite
+from pydantic import ValidationError
 
 from ..models import Observation
 from ..models import PatchCompaction
@@ -30,6 +33,8 @@ from ..models import Reflection
 from ..models import TaskStateAnchor
 from ..models import ToolRunCompaction
 from .base_compaction_service import BaseCompactionService
+
+logger = logging.getLogger(__name__)
 
 PRAGMA_FOREIGN_KEYS = 'PRAGMA foreign_keys = ON'
 
@@ -188,6 +193,18 @@ class SqliteCompactionService(BaseCompactionService):
     )
     self._schema_ready = False
     self._schema_lock = asyncio.Lock()
+    self._db_connection: aiosqlite.Connection | None = None
+    self._db_connection_lock = asyncio.Lock()
+    self._db_operation_lock = asyncio.Lock()
+
+  def __del__(self):
+    if self._db_connection is None:
+      return
+    try:
+      self._db_connection.stop()
+    except RuntimeError:
+      pass
+    self._db_connection = None
 
   async def save_tool_run_compaction(
       self, tool_run_compaction: ToolRunCompaction
@@ -196,49 +213,59 @@ class SqliteCompactionService(BaseCompactionService):
     file_paths = {ref.path for ref in tool_run_compaction.file_line_refs}
 
     async with self._get_db_connection() as db:
-      now = time.time()
-      await db.execute(
-          """
-          INSERT INTO tool_run_compactions (event_id, compaction_json, created_at)
-          VALUES (?, ?, ?)
-          ON CONFLICT(event_id) DO UPDATE SET
-            compaction_json=excluded.compaction_json,
-            created_at=excluded.created_at
-          """,
-          (
-              tool_run_compaction.event_id,
-              tool_run_compaction.model_dump_json(exclude_none=True),
-              now,
-          ),
-      )
+      try:
+        now = time.time()
+        await db.execute('BEGIN')
+        await db.execute(
+            """
+            INSERT INTO tool_run_compactions (
+              event_id,
+              compaction_json,
+              created_at
+            )
+            VALUES (?, ?, ?)
+            ON CONFLICT(event_id) DO UPDATE SET
+              compaction_json=excluded.compaction_json,
+              created_at=excluded.created_at
+            """,
+            (
+                tool_run_compaction.event_id,
+                tool_run_compaction.model_dump_json(exclude_none=True),
+                now,
+            ),
+        )
 
-      await db.execute(
-          'DELETE FROM tool_run_error_signatures WHERE event_id=?',
-          (tool_run_compaction.event_id,),
-      )
-      await db.execute(
-          'DELETE FROM tool_run_file_paths WHERE event_id=?',
-          (tool_run_compaction.event_id,),
-      )
+        await db.execute(
+            'DELETE FROM tool_run_error_signatures WHERE event_id=?',
+            (tool_run_compaction.event_id,),
+        )
+        await db.execute(
+            'DELETE FROM tool_run_file_paths WHERE event_id=?',
+            (tool_run_compaction.event_id,),
+        )
 
-      await db.executemany(
-          """
-          INSERT INTO tool_run_error_signatures (event_id, signature)
-          VALUES (?, ?)
-          """,
-          [
-              (tool_run_compaction.event_id, signature)
-              for signature in set(tool_run_compaction.error_signatures)
-          ],
-      )
-      await db.executemany(
-          """
-          INSERT INTO tool_run_file_paths (event_id, path)
-          VALUES (?, ?)
-          """,
-          [(tool_run_compaction.event_id, path) for path in file_paths],
-      )
-      await db.commit()
+        await db.executemany(
+            """
+            INSERT INTO tool_run_error_signatures (event_id, signature)
+            VALUES (?, ?)
+            """,
+            [
+                (tool_run_compaction.event_id, signature)
+                for signature in set(tool_run_compaction.error_signatures)
+            ],
+        )
+        await db.executemany(
+            """
+            INSERT INTO tool_run_file_paths (event_id, path)
+            VALUES (?, ?)
+            """,
+            [(tool_run_compaction.event_id, path) for path in file_paths],
+        )
+      except Exception:
+        await db.rollback()
+        raise
+      else:
+        await db.commit()
 
   async def save_patch_compaction(
       self, patch_compaction: PatchCompaction
@@ -248,31 +275,41 @@ class SqliteCompactionService(BaseCompactionService):
     file_paths.update(hunk.path for hunk in patch_compaction.hunks)
 
     async with self._get_db_connection() as db:
-      now = time.time()
-      await db.execute(
-          """
-          INSERT INTO patch_compactions (event_id, compaction_json, created_at)
-          VALUES (?, ?, ?)
-          ON CONFLICT(event_id) DO UPDATE SET
-            compaction_json=excluded.compaction_json,
-            created_at=excluded.created_at
-          """,
-          (
-              patch_compaction.event_id,
-              patch_compaction.model_dump_json(exclude_none=True),
-              now,
-          ),
-      )
+      try:
+        now = time.time()
+        await db.execute('BEGIN')
+        await db.execute(
+            """
+            INSERT INTO patch_compactions (
+              event_id,
+              compaction_json,
+              created_at
+            )
+            VALUES (?, ?, ?)
+            ON CONFLICT(event_id) DO UPDATE SET
+              compaction_json=excluded.compaction_json,
+              created_at=excluded.created_at
+            """,
+            (
+                patch_compaction.event_id,
+                patch_compaction.model_dump_json(exclude_none=True),
+                now,
+            ),
+        )
 
-      await db.execute(
-          'DELETE FROM patch_file_paths WHERE event_id=?',
-          (patch_compaction.event_id,),
-      )
-      await db.executemany(
-          'INSERT INTO patch_file_paths (event_id, path) VALUES (?, ?)',
-          [(patch_compaction.event_id, path) for path in file_paths],
-      )
-      await db.commit()
+        await db.execute(
+            'DELETE FROM patch_file_paths WHERE event_id=?',
+            (patch_compaction.event_id,),
+        )
+        await db.executemany(
+            'INSERT INTO patch_file_paths (event_id, path) VALUES (?, ?)',
+            [(patch_compaction.event_id, path) for path in file_paths],
+        )
+      except Exception:
+        await db.rollback()
+        raise
+      else:
+        await db.commit()
 
   async def save_observation(self, observation: Observation) -> None:
     await self._ensure_schema()
@@ -374,7 +411,12 @@ class SqliteCompactionService(BaseCompactionService):
         row = await cursor.fetchone()
     if row is None:
       return None
-    return ToolRunCompaction.model_validate_json(row['compaction_json'])
+    return self._parse_single_row_json(
+        row_json=row['compaction_json'],
+        model_name='tool_run_compaction',
+        record_id=event_id,
+        model_cls=ToolRunCompaction,
+    )
 
   async def get_patch_compaction(self, event_id: str) -> PatchCompaction | None:
     await self._ensure_schema()
@@ -387,7 +429,12 @@ class SqliteCompactionService(BaseCompactionService):
         row = await cursor.fetchone()
     if row is None:
       return None
-    return PatchCompaction.model_validate_json(row['compaction_json'])
+    return self._parse_single_row_json(
+        row_json=row['compaction_json'],
+        model_name='patch_compaction',
+        record_id=event_id,
+        model_cls=PatchCompaction,
+    )
 
   async def get_observations(
       self,
@@ -411,9 +458,16 @@ class SqliteCompactionService(BaseCompactionService):
 
     async with self._get_db_connection() as db:
       rows = await db.execute_fetchall(query, params)
-    return [
-        Observation.model_validate_json(row['observation_json']) for row in rows
-    ]
+    observations: list[Observation] = []
+    for row in rows:
+      parsed_observation = self._parse_multi_row_json(
+          row_json=row['observation_json'],
+          model_name='observation',
+          model_cls=Observation,
+      )
+      if parsed_observation is not None:
+        observations.append(parsed_observation)
+    return observations
 
   async def get_latest_reflection(self, session_id: str) -> Reflection | None:
     await self._ensure_schema()
@@ -432,7 +486,12 @@ class SqliteCompactionService(BaseCompactionService):
         row = await cursor.fetchone()
     if row is None:
       return None
-    return Reflection.model_validate_json(row['reflection_json'])
+    return self._parse_single_row_json(
+        row_json=row['reflection_json'],
+        model_name='reflection',
+        record_id=session_id,
+        model_cls=Reflection,
+    )
 
   async def get_task_state(self, session_id: str) -> TaskStateAnchor | None:
     await self._ensure_schema()
@@ -445,7 +504,12 @@ class SqliteCompactionService(BaseCompactionService):
         row = await cursor.fetchone()
     if row is None:
       return None
-    return TaskStateAnchor.model_validate_json(row['task_state_json'])
+    return self._parse_single_row_json(
+        row_json=row['task_state_json'],
+        model_name='task_state',
+        record_id=session_id,
+        model_cls=TaskStateAnchor,
+    )
 
   async def query_by_error_signature(
       self, signature: str
@@ -455,7 +519,7 @@ class SqliteCompactionService(BaseCompactionService):
     async with self._get_db_connection() as db:
       rows = await db.execute_fetchall(
           """
-          SELECT tr.compaction_json
+          SELECT tr.event_id, tr.compaction_json
           FROM tool_run_compactions tr
           JOIN tool_run_error_signatures es
             ON es.event_id = tr.event_id
@@ -464,10 +528,17 @@ class SqliteCompactionService(BaseCompactionService):
           """,
           (signature,),
       )
-    return [
-        ToolRunCompaction.model_validate_json(row['compaction_json'])
-        for row in rows
-    ]
+    results: list[ToolRunCompaction] = []
+    for row in rows:
+      parsed_compaction = self._parse_multi_row_json(
+          row_json=row['compaction_json'],
+          model_name='tool_run_compaction',
+          model_cls=ToolRunCompaction,
+          record_id=row['event_id'],
+      )
+      if parsed_compaction is not None:
+        results.append(parsed_compaction)
+    return results
 
   async def query_by_file_path(
       self, path: str
@@ -477,7 +548,7 @@ class SqliteCompactionService(BaseCompactionService):
     async with self._get_db_connection() as db:
       tool_rows = await db.execute_fetchall(
           """
-          SELECT tr.compaction_json
+          SELECT tr.event_id, tr.compaction_json
           FROM tool_run_compactions tr
           JOIN tool_run_file_paths tfp
             ON tfp.event_id = tr.event_id
@@ -488,7 +559,7 @@ class SqliteCompactionService(BaseCompactionService):
       )
       patch_rows = await db.execute_fetchall(
           """
-          SELECT pc.compaction_json
+          SELECT pc.event_id, pc.compaction_json
           FROM patch_compactions pc
           JOIN patch_file_paths pfp
             ON pfp.event_id = pc.event_id
@@ -498,24 +569,57 @@ class SqliteCompactionService(BaseCompactionService):
           (path,),
       )
 
-    tool_results = [
-        ToolRunCompaction.model_validate_json(row['compaction_json'])
-        for row in tool_rows
-    ]
-    patch_results = [
-        PatchCompaction.model_validate_json(row['compaction_json'])
-        for row in patch_rows
-    ]
+    tool_results: list[ToolRunCompaction] = []
+    for row in tool_rows:
+      parsed_tool = self._parse_multi_row_json(
+          row_json=row['compaction_json'],
+          model_name='tool_run_compaction',
+          model_cls=ToolRunCompaction,
+          record_id=row['event_id'],
+      )
+      if parsed_tool is not None:
+        tool_results.append(parsed_tool)
+
+    patch_results: list[PatchCompaction] = []
+    for row in patch_rows:
+      parsed_patch = self._parse_multi_row_json(
+          row_json=row['compaction_json'],
+          model_name='patch_compaction',
+          model_cls=PatchCompaction,
+          record_id=row['event_id'],
+      )
+      if parsed_patch is not None:
+        patch_results.append(parsed_patch)
     return [*tool_results, *patch_results]
 
   @asynccontextmanager
   async def _get_db_connection(self):
-    async with aiosqlite.connect(
-        self._db_connect_path, uri=self._db_connect_uri
-    ) as db:
-      db.row_factory = aiosqlite.Row
-      await db.execute(PRAGMA_FOREIGN_KEYS)
+    db = await self._get_or_create_connection()
+    async with self._db_operation_lock:
       yield db
+
+  async def _get_or_create_connection(self) -> aiosqlite.Connection:
+    if self._db_connection is not None:
+      return self._db_connection
+
+    async with self._db_connection_lock:
+      if self._db_connection is None:
+        db = await aiosqlite.connect(
+            self._db_connect_path, uri=self._db_connect_uri
+        )
+        db.row_factory = aiosqlite.Row
+        await db.execute(PRAGMA_FOREIGN_KEYS)
+        self._db_connection = db
+    return self._db_connection
+
+  async def close(self) -> None:
+    """Closes the reusable sqlite connection."""
+    async with self._db_connection_lock:
+      if self._db_connection is None:
+        return
+      async with self._db_operation_lock:
+        await self._db_connection.close()
+        self._db_connection = None
 
   async def _ensure_schema(self) -> None:
     if self._schema_ready:
@@ -578,6 +682,14 @@ class SqliteCompactionService(BaseCompactionService):
 
   def is_migration_needed(self) -> bool:
     """Returns whether the database schema is older than current version."""
+    return self._is_migration_needed_sync()
+
+  async def is_migration_needed_async(self) -> bool:
+    """Async-friendly migration-needed check for callers in event loops."""
+    return await asyncio.to_thread(self._is_migration_needed_sync)
+
+  def _is_migration_needed_sync(self) -> bool:
+    """Checks whether sqlite schema migration is needed."""
     if not os.path.exists(self._db_path):
       return False
     try:
@@ -601,3 +713,51 @@ class SqliteCompactionService(BaseCompactionService):
       raise RuntimeError(
           f'Error accessing database {self._db_path}: {e}'
       ) from e
+
+  def _parse_single_row_json(
+      self,
+      *,
+      row_json: str,
+      model_name: str,
+      record_id: str,
+      model_cls: type[_CompactionModelT],
+  ) -> _CompactionModelT:
+    try:
+      return model_cls.model_validate_json(row_json)
+    except ValidationError as e:
+      raise RuntimeError(
+          f'Invalid {model_name} JSON for record {record_id} in sqlite store.'
+      ) from e
+
+  def _parse_multi_row_json(
+      self,
+      *,
+      row_json: str,
+      model_name: str,
+      model_cls: type[_CompactionModelT],
+      record_id: str | None = None,
+  ) -> _CompactionModelT | None:
+    try:
+      return model_cls.model_validate_json(row_json)
+    except ValidationError:
+      if record_id is None:
+        logger.warning(
+            'Skipping invalid %s JSON row in sqlite store.', model_name
+        )
+      else:
+        logger.warning(
+            'Skipping invalid %s JSON row for record %s in sqlite store.',
+            model_name,
+            record_id,
+        )
+      return None
+
+
+_CompactionModelT = TypeVar(
+    '_CompactionModelT',
+    ToolRunCompaction,
+    PatchCompaction,
+    Observation,
+    Reflection,
+    TaskStateAnchor,
+)
