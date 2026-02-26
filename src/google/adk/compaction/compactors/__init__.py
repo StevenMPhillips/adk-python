@@ -17,6 +17,7 @@
 from .base import BaseToolRunCompactor
 from .generic import GenericToolRunCompactor
 from .mypy_compactor import MypyCompactor
+from .patch_compactor import PatchCompactor
 from .pytest_compactor import PytestCompactor
 from .registry import ToolRunCompactorRegistry
 from .ruff_compactor import RuffCompactor
@@ -25,6 +26,7 @@ __all__ = [
     'BaseToolRunCompactor',
     'GenericToolRunCompactor',
     'MypyCompactor',
+    'PatchCompactor',
     'PytestCompactor',
     'RuffCompactor',
     'ToolRunCompactorRegistry',
