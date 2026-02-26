@@ -39,3 +39,11 @@
 - Duration: N/A
 - Status: complete
 ---
+
+## 2026-02-25 22:39 PST - Story US-006: Implement PatchCompactor for unified diffs
+- Sub-agent: ses_367574d0bffeBSWM8B07qsQBTs
+- Commit: a0019417 (by: sub-agent)
+- Files changed: src/google/adk/compaction/compactors/__init__.py, src/google/adk/compaction/compactors/patch_compactor.py, tests/unittests/compaction/test_patch_compactor.py
+- Duration: N/A
+- Status: complete
+---
