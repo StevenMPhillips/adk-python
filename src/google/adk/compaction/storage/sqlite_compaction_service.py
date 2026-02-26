@@ -33,6 +33,7 @@ from ..models import Reflection
 from ..models import TaskStateAnchor
 from ..models import ToolRunCompaction
 from .base_compaction_service import BaseCompactionService
+from .base_compaction_service import CompactionCleanupStats
 
 logger = logging.getLogger(__name__)
 
@@ -591,6 +592,265 @@ class SqliteCompactionService(BaseCompactionService):
       if parsed_patch is not None:
         patch_results.append(parsed_patch)
     return [*tool_results, *patch_results]
+
+  async def cleanup_artifacts(
+      self,
+      *,
+      max_age_seconds: float | None = None,
+      max_records_per_kind: int | None = None,
+      session_id: str | None = None,
+      now: float | None = None,
+  ) -> CompactionCleanupStats:
+    if max_age_seconds is None and max_records_per_kind is None:
+      return CompactionCleanupStats()
+
+    if max_age_seconds is not None and max_age_seconds < 0:
+      raise ValueError('max_age_seconds must be >= 0 when provided.')
+    if max_records_per_kind is not None and max_records_per_kind < 0:
+      raise ValueError('max_records_per_kind must be >= 0 when provided.')
+
+    await self._ensure_schema()
+    effective_now = time.time() if now is None else now
+    cutoff = (
+        effective_now - max_age_seconds
+        if max_age_seconds is not None
+        else None
+    )
+
+    deleted_tool_runs = 0
+    deleted_patches = 0
+    deleted_observations = 0
+    deleted_reflections = 0
+    deleted_task_states = 0
+
+    async with self._get_db_connection() as db:
+      try:
+        await db.execute('BEGIN')
+
+        if session_id is None:
+          deleted_tool_runs += await self._delete_older_than(
+              db,
+              table='tool_run_compactions',
+              timestamp_column='created_at',
+              cutoff=cutoff,
+          )
+          deleted_tool_runs += await self._delete_oldest_excess_records(
+              db,
+              table='tool_run_compactions',
+              id_column='event_id',
+              timestamp_column='created_at',
+              max_records=max_records_per_kind,
+          )
+
+          deleted_patches += await self._delete_older_than(
+              db,
+              table='patch_compactions',
+              timestamp_column='created_at',
+              cutoff=cutoff,
+          )
+          deleted_patches += await self._delete_oldest_excess_records(
+              db,
+              table='patch_compactions',
+              id_column='event_id',
+              timestamp_column='created_at',
+              max_records=max_records_per_kind,
+          )
+
+        deleted_observations += await self._delete_older_than(
+            db,
+            table='observations',
+            timestamp_column='created_at',
+            cutoff=cutoff,
+            session_id=session_id,
+        )
+        deleted_observations += await self._delete_oldest_excess_records(
+            db,
+            table='observations',
+            id_column='observation_id',
+            timestamp_column='created_at',
+            max_records=max_records_per_kind,
+            session_id=session_id,
+            partition_by_session=True,
+        )
+
+        deleted_reflections += await self._delete_older_than(
+            db,
+            table='reflections',
+            timestamp_column='created_at',
+            cutoff=cutoff,
+            session_id=session_id,
+        )
+        deleted_reflections += await self._delete_oldest_excess_records(
+            db,
+            table='reflections',
+            id_column='reflection_id',
+            timestamp_column='created_at',
+            max_records=max_records_per_kind,
+            session_id=session_id,
+            partition_by_session=True,
+        )
+
+        deleted_task_states += await self._delete_older_than(
+            db,
+            table='task_states',
+            timestamp_column='updated_at',
+            cutoff=cutoff,
+            session_id=session_id,
+        )
+
+        if session_id is None:
+          deleted_task_states += await self._delete_oldest_excess_records(
+              db,
+              table='task_states',
+              id_column='session_id',
+              timestamp_column='updated_at',
+              max_records=max_records_per_kind,
+          )
+
+      except Exception:
+        await db.rollback()
+        raise
+      else:
+        await db.commit()
+
+    return CompactionCleanupStats(
+        tool_run_compactions_deleted=deleted_tool_runs,
+        patch_compactions_deleted=deleted_patches,
+        observations_deleted=deleted_observations,
+        reflections_deleted=deleted_reflections,
+        task_states_deleted=deleted_task_states,
+    )
+
+  async def evict_session(self, session_id: str) -> CompactionCleanupStats:
+    await self._ensure_schema()
+
+    async with self._get_db_connection() as db:
+      try:
+        await db.execute('BEGIN')
+        observations_deleted = await self._execute_delete_count(
+            db,
+            'DELETE FROM observations WHERE session_id=?',
+            (session_id,),
+        )
+        reflections_deleted = await self._execute_delete_count(
+            db,
+            'DELETE FROM reflections WHERE session_id=?',
+            (session_id,),
+        )
+        task_states_deleted = await self._execute_delete_count(
+            db,
+            'DELETE FROM task_states WHERE session_id=?',
+            (session_id,),
+        )
+      except Exception:
+        await db.rollback()
+        raise
+      else:
+        await db.commit()
+
+    return CompactionCleanupStats(
+        observations_deleted=observations_deleted,
+        reflections_deleted=reflections_deleted,
+        task_states_deleted=task_states_deleted,
+    )
+
+  async def _delete_older_than(
+      self,
+      db: aiosqlite.Connection,
+      *,
+      table: str,
+      timestamp_column: str,
+      cutoff: float | None,
+      session_id: str | None = None,
+  ) -> int:
+    if cutoff is None:
+      return 0
+
+    query = (
+        f'DELETE FROM {table} WHERE {timestamp_column} <= ?'
+    )
+    params: list[object] = [cutoff]
+    if session_id is not None:
+      query += ' AND session_id = ?'
+      params.append(session_id)
+    return await self._execute_delete_count(db, query, tuple(params))
+
+  async def _delete_oldest_excess_records(
+      self,
+      db: aiosqlite.Connection,
+      *,
+      table: str,
+      id_column: str,
+      timestamp_column: str,
+      max_records: int | None,
+      session_id: str | None = None,
+      partition_by_session: bool = False,
+  ) -> int:
+    if max_records is None:
+      return 0
+
+    if partition_by_session:
+      where_clause = ''
+      params: list[object] = [max_records]
+      if session_id is not None:
+        where_clause = 'WHERE session_id = ?'
+        params = [session_id, max_records]
+      return await self._execute_delete_count(
+          db,
+          f'''
+          WITH ranked AS (
+            SELECT
+              {id_column} AS delete_id,
+              ROW_NUMBER() OVER (
+                PARTITION BY session_id
+                ORDER BY {timestamp_column} DESC, {id_column} DESC
+              ) AS rn
+            FROM {table}
+            {where_clause}
+          )
+          DELETE FROM {table}
+          WHERE {id_column} IN (
+            SELECT delete_id FROM ranked WHERE rn > ?
+          )
+          ''',
+          tuple(params),
+      )
+
+    where_clause = ''
+    params = [max_records]
+    if session_id is not None:
+      where_clause = 'WHERE session_id = ?'
+      params = [session_id, max_records]
+    return await self._execute_delete_count(
+        db,
+        f'''
+        WITH ranked AS (
+          SELECT
+            {id_column} AS delete_id,
+            ROW_NUMBER() OVER (
+              ORDER BY {timestamp_column} DESC, {id_column} DESC
+            ) AS rn
+          FROM {table}
+          {where_clause}
+        )
+        DELETE FROM {table}
+        WHERE {id_column} IN (
+          SELECT delete_id FROM ranked WHERE rn > ?
+        )
+        ''',
+        tuple(params),
+    )
+
+  async def _execute_delete_count(
+      self,
+      db: aiosqlite.Connection,
+      query: str,
+      params: tuple[object, ...] = (),
+  ) -> int:
+    await db.execute(query, params)
+    async with db.execute('SELECT changes()') as cursor:
+      row = await cursor.fetchone()
+    return int(row[0] if row is not None else 0)
 
   @asynccontextmanager
   async def _get_db_connection(self):
