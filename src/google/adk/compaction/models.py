@@ -14,9 +14,13 @@
 
 from __future__ import annotations
 
+from typing import Literal
+from uuid import uuid4
+
 from pydantic import alias_generators
 from pydantic import BaseModel
 from pydantic import ConfigDict
+from pydantic import Field
 
 
 class _CompactionModel(BaseModel):
@@ -90,3 +94,67 @@ class PatchCompaction(_CompactionModel):
   semantic_tags: list[str]
   stats: CompactionStats
   provenance: Provenance
+
+
+class EvidenceRef(_CompactionModel):
+  """Typed reference to source evidence backing a claim."""
+
+  ref_type: str
+  ref_id: str
+
+
+class Decision(_CompactionModel):
+  """A decision with evidence and explicitness metadata."""
+
+  text: str
+  kind: Literal['explicit', 'inferred']
+  evidence_refs: list[EvidenceRef]
+
+
+class EvidencedItem(_CompactionModel):
+  """A textual item backed by evidence references."""
+
+  text: str
+  evidence_refs: list[EvidenceRef]
+
+
+class Observation(_CompactionModel):
+  """Observation artifact extracted from a session span."""
+
+  observation_id: str = Field(default_factory=lambda: str(uuid4()))
+  session_id: str
+  start_seq: int
+  end_seq: int
+  text: str
+  decisions: list[Decision]
+  learned_constraints: list[Decision]
+  open_questions: list[EvidencedItem]
+  next_steps: list[EvidencedItem]
+  evidence_refs: list[EvidenceRef]
+
+
+class Reflection(_CompactionModel):
+  """Reflection artifact that synthesizes one or more observations."""
+
+  reflection_id: str = Field(default_factory=lambda: str(uuid4()))
+  session_id: str
+  covers_observation_ids: list[str]
+  text: str
+  stable_facts: list[EvidencedItem]
+  recurring_failures: list[EvidencedItem]
+  strategy_updates: list[EvidencedItem]
+  evidence_refs: list[EvidenceRef]
+
+
+class TaskStateAnchor(_CompactionModel):
+  """Current task state snapshot anchored to a session sequence."""
+
+  session_id: str
+  state_version: int = 0
+  objective: str
+  constraints: list[EvidencedItem]
+  hypotheses: list[EvidencedItem]
+  known_failures: list[EvidencedItem]
+  current_plan: list[EvidencedItem]
+  next_steps: list[EvidencedItem]
+  last_updated_seq: int

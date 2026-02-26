@@ -15,17 +15,29 @@
 """Models for deterministic artifact compaction outputs."""
 
 from .models import CompactionStats
+from .models import Decision
+from .models import EvidenceRef
+from .models import EvidencedItem
 from .models import FileLineRef
 from .models import HunkSummary
+from .models import Observation
 from .models import PatchCompaction
 from .models import Provenance
+from .models import Reflection
+from .models import TaskStateAnchor
 from .models import ToolRunCompaction
 
 __all__ = [
     'CompactionStats',
+    'Decision',
+    'EvidenceRef',
+    'EvidencedItem',
     'FileLineRef',
     'HunkSummary',
+    'Observation',
     'PatchCompaction',
     'Provenance',
+    'Reflection',
+    'TaskStateAnchor',
     'ToolRunCompaction',
 ]
