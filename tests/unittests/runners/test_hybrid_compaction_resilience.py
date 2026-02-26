@@ -23,6 +23,11 @@ from google.adk.apps.app import EventsCompactionConfig
 from google.adk.compaction.compactors.patch_compactor import PatchCompactor
 from google.adk.compaction.compactors.registry import ToolRunCompactorRegistry
 from google.adk.compaction.config import HybridEventsCompactionConfig
+from google.adk.compaction.models import Decision
+from google.adk.compaction.models import EvidencedItem
+from google.adk.compaction.models import EvidenceRef
+from google.adk.compaction.models import Observation
+from google.adk.compaction.models import Reflection
 from google.adk.compaction.storage.in_memory_compaction_service import InMemoryCompactionService
 from google.adk.tools.function_tool import FunctionTool
 from google.genai.types import FunctionCall
@@ -49,6 +54,54 @@ def _event_texts(events) -> list[str]:
       continue
     texts.extend(part.text for part in event.content.parts if part.text)
   return texts
+
+
+def _observation(
+    *,
+    session_id: str,
+    observation_id: str,
+    start_seq: int,
+    end_seq: int,
+) -> Observation:
+  evidence_ref = EvidenceRef(ref_type='event', ref_id=f'event-{end_seq}')
+  decision = Decision(
+      text='Tool output indicates next debug step.',
+      kind='explicit',
+      evidence_refs=[evidence_ref],
+  )
+  next_step = EvidencedItem(
+      text='Run a focused unit test target.',
+      evidence_refs=[evidence_ref],
+  )
+  return Observation(
+      observation_id=observation_id,
+      session_id=session_id,
+      start_seq=start_seq,
+      end_seq=end_seq,
+      text='Observed progress from deterministic tool events.',
+      decisions=[decision],
+      learned_constraints=[],
+      open_questions=[],
+      next_steps=[next_step],
+      evidence_refs=[evidence_ref],
+  )
+
+
+def _reflection(*, session_id: str, observation_ids: list[str]) -> Reflection:
+  evidence_ref = EvidenceRef(ref_type='observation', ref_id=observation_ids[0])
+  item = EvidencedItem(
+      text='Stable pattern: narrow failures first.',
+      evidence_refs=[evidence_ref],
+  )
+  return Reflection(
+      session_id=session_id,
+      covers_observation_ids=observation_ids,
+      text='Reflection over recent observations.',
+      stable_facts=[item],
+      recurring_failures=[],
+      strategy_updates=[],
+      evidence_refs=[evidence_ref],
+  )
 
 
 class _FailingCompactionService(InMemoryCompactionService):
@@ -345,7 +398,7 @@ async def test_observational_runtime_not_initialized_when_flag_disabled(
 
 
 @pytest.mark.asyncio
-async def test_observational_runtime_updates_task_state_when_triggered(
+async def test_observational_runtime_attempts_observation_and_task_updates(
     monkeypatch,
 ):
   tool = FunctionTool(func=_run_shell)
@@ -384,31 +437,81 @@ async def test_observational_runtime_updates_task_state_when_triggered(
   runner = testing_utils.InMemoryRunner(app=app)
 
   runtime_calls = {
-      'observation': 0,
-      'reflection': 0,
-      'task_state': 0,
+      'observation_writer_init': 0,
+      'reflection_writer_init': 0,
+      'task_state_updater_init': 0,
+      'write_observation': 0,
       'update_from_tool_run': 0,
+      'update_from_observation': 0,
+      'write_reflection': 0,
   }
 
   class _ObservationWriterStub:
 
-    def __init__(self, **_kwargs):
-      runtime_calls['observation'] += 1
+    def __init__(self, **kwargs):
+      runtime_calls['observation_writer_init'] += 1
+      self._compaction_service = kwargs['compaction_service']
+
+    async def maybe_write_observation(self, **kwargs):
+      runtime_calls['write_observation'] += 1
+      assert kwargs['recent_raw_turns']
+      assert kwargs['recent_tool_run_compactions']
+      observation = _observation(
+          session_id=kwargs['current_task_state'].session_id,
+          observation_id='obs-triggered',
+          start_seq=kwargs['recent_raw_turns'][0].seq,
+          end_seq=kwargs['recent_raw_turns'][-1].seq,
+      )
+      await self._compaction_service.save_observation(observation)
+      return observation
 
   class _ReflectionWriterStub:
 
-    def __init__(self, **_kwargs):
-      runtime_calls['reflection'] += 1
+    def __init__(self, **kwargs):
+      runtime_calls['reflection_writer_init'] += 1
+      self._compaction_service = kwargs['compaction_service']
+
+    async def maybe_write_reflection(self, **kwargs):
+      runtime_calls['write_reflection'] += 1
+      if len(kwargs['recent_observations']) >= 1:
+        reflection = _reflection(
+            session_id=kwargs['current_task_state'].session_id,
+            observation_ids=[
+                kwargs['recent_observations'][-1].observation_id,
+            ],
+        )
+        await self._compaction_service.save_reflection(reflection)
+        return reflection
+      return None
 
   class _TaskStateUpdaterStub:
 
-    def __init__(self, **_kwargs):
-      runtime_calls['task_state'] += 1
+    def __init__(self, **kwargs):
+      runtime_calls['task_state_updater_init'] += 1
+      self._compaction_service = kwargs['compaction_service']
 
     async def update_from_tool_run(self, **kwargs):
       assert kwargs['tool_run_compaction'].event_id
       runtime_calls['update_from_tool_run'] += 1
-      return kwargs['current_task_state']
+      updated_state = kwargs['current_task_state'].model_copy(
+          update={
+              'state_version': kwargs['current_task_state'].state_version + 1,
+          }
+      )
+      await self._compaction_service.save_task_state(updated_state)
+      return updated_state
+
+    async def update_from_observation(self, **kwargs):
+      runtime_calls['update_from_observation'] += 1
+      assert kwargs['use_llm'] is False
+      updated_state = kwargs['current_task_state'].model_copy(
+          update={
+              'state_version': kwargs['current_task_state'].state_version + 1,
+              'last_updated_seq': kwargs['observation'].end_seq,
+          }
+      )
+      await self._compaction_service.save_task_state(updated_state)
+      return updated_state
 
   monkeypatch.setattr(
       'google.adk.runners.ObservationWriter', _ObservationWriterStub
@@ -433,14 +536,135 @@ async def test_observational_runtime_updates_task_state_when_triggered(
 
   assert 'tool invocation completed' in _event_texts(events)
   assert runtime_calls == {
-      'observation': 1,
-      'reflection': 1,
-      'task_state': 1,
+      'observation_writer_init': 1,
+      'reflection_writer_init': 1,
+      'task_state_updater_init': 1,
+      'write_observation': 1,
       'update_from_tool_run': 1,
+      'update_from_observation': 1,
+      'write_reflection': 1,
   }
-  assert compaction_service.save_observation_calls == 0
-  assert compaction_service.save_reflection_calls == 0
-  assert compaction_service.save_task_state_calls == 0
+  assert compaction_service.save_observation_calls == 1
+  assert compaction_service.save_reflection_calls == 1
+  assert compaction_service.save_task_state_calls >= 2
+
+
+@pytest.mark.asyncio
+async def test_observational_runtime_attempts_reflection_with_enough_observations(
+    monkeypatch,
+):
+  tool = FunctionTool(func=_run_shell)
+  model = testing_utils.MockModel.create([
+      testing_utils.LlmResponse(
+          content=testing_utils.ModelContent(
+              parts=[
+                  Part(
+                      function_call=FunctionCall(
+                          name=tool.name,
+                          args={'command': 'pytest tests/unittests'},
+                      )
+                  )
+              ]
+          )
+      ),
+      testing_utils.LlmResponse(
+          content=testing_utils.ModelContent(parts=[Part(text='done')])
+      ),
+  ])
+  compaction_service = _NoOpCheckCompactionService()
+  app = App(
+      name='observational_runtime_reflection_app',
+      root_agent=LlmAgent(name='agent', model=model, tools=[tool]),
+      events_compaction_config=HybridEventsCompactionConfig(
+          compaction_service=compaction_service,
+          tool_run_compactor_registry=ToolRunCompactorRegistry(),
+          patch_compactor=PatchCompactor(),
+          compaction_interval=999,
+          overlap_size=0,
+          enable_observational_memory=True,
+      ),
+  )
+  runner = testing_utils.InMemoryRunner(app=app)
+
+  await compaction_service.save_observation(
+      _observation(
+          session_id=runner.session.id,
+          observation_id='obs-seeded',
+          start_seq=1,
+          end_seq=2,
+      )
+  )
+
+  reflection_calls = {'attempts': 0}
+
+  class _ObservationWriterStub:
+
+    def __init__(self, **kwargs):
+      self._compaction_service = kwargs['compaction_service']
+
+    async def maybe_write_observation(self, **kwargs):
+      observation = _observation(
+          session_id=kwargs['current_task_state'].session_id,
+          observation_id='obs-generated',
+          start_seq=kwargs['recent_raw_turns'][0].seq,
+          end_seq=kwargs['recent_raw_turns'][-1].seq,
+      )
+      await self._compaction_service.save_observation(observation)
+      return observation
+
+  class _ReflectionWriterStub:
+
+    def __init__(self, **kwargs):
+      self._compaction_service = kwargs['compaction_service']
+
+    async def maybe_write_reflection(self, **kwargs):
+      reflection_calls['attempts'] += 1
+      assert len(kwargs['recent_observations']) >= 2
+      reflection = _reflection(
+          session_id=kwargs['current_task_state'].session_id,
+          observation_ids=[
+              observation.observation_id
+              for observation in kwargs['recent_observations'][-2:]
+          ],
+      )
+      await self._compaction_service.save_reflection(reflection)
+      return reflection
+
+  class _TaskStateUpdaterStub:
+
+    def __init__(self, **_kwargs):
+      pass
+
+    async def update_from_tool_run(self, **kwargs):
+      return kwargs['current_task_state']
+
+    async def update_from_observation(self, **kwargs):
+      return kwargs['current_task_state']
+
+  monkeypatch.setattr(
+      'google.adk.runners.ObservationWriter', _ObservationWriterStub
+  )
+  monkeypatch.setattr(
+      'google.adk.runners.ReflectionWriter', _ReflectionWriterStub
+  )
+  monkeypatch.setattr(
+      'google.adk.runners.TaskStateUpdater', _TaskStateUpdaterStub
+  )
+
+  events = []
+  async for event in runner.runner.run_async(
+      user_id=runner.session.user_id,
+      session_id=runner.session.id,
+      new_message=testing_utils.UserContent('run the shell tool'),
+      run_config=RunConfig(
+          custom_metadata={'trigger_observational_memory_runtime': True}
+      ),
+  ):
+    events.append(event)
+
+  assert 'done' in _event_texts(events)
+  assert reflection_calls['attempts'] == 1
+  assert compaction_service.save_reflection_calls == 1
 
 
 @pytest.mark.asyncio
@@ -487,6 +711,7 @@ async def test_observational_runtime_noop_when_runtime_trigger_not_set(
       'reflection': 0,
       'task_state': 0,
       'update_from_tool_run': 0,
+      'update_from_observation': 0,
   }
 
   class _ObservationWriterStub:
@@ -508,6 +733,10 @@ async def test_observational_runtime_noop_when_runtime_trigger_not_set(
       runtime_calls['update_from_tool_run'] += 1
       pytest.fail('Task-state deterministic update should not run.')
 
+    async def update_from_observation(self, **_kwargs):
+      runtime_calls['update_from_observation'] += 1
+      pytest.fail('Observation task-state update should not run.')
+
   monkeypatch.setattr(
       'google.adk.runners.ObservationWriter', _ObservationWriterStub
   )
@@ -526,11 +755,14 @@ async def test_observational_runtime_noop_when_runtime_trigger_not_set(
       'reflection': 1,
       'task_state': 1,
       'update_from_tool_run': 0,
+      'update_from_observation': 0,
   }
 
 
 @pytest.mark.asyncio
-async def test_observational_runtime_failure_degrades_but_continues(caplog):
+async def test_observational_runtime_writer_failures_degrade_but_continue(
+    caplog, monkeypatch
+):
   tool = FunctionTool(func=_run_shell)
   model = testing_utils.MockModel.create([
       testing_utils.LlmResponse(
@@ -549,7 +781,7 @@ async def test_observational_runtime_failure_degrades_but_continues(caplog):
           content=testing_utils.ModelContent(parts=[Part(text='done')])
       ),
   ])
-  compaction_service = _FailingCompactionService(fail_get_task_state=True)
+  compaction_service = _NoOpCheckCompactionService()
   app = App(
       name='observational_runtime_failure_app',
       root_agent=LlmAgent(name='agent', model=model, tools=[tool]),
@@ -563,6 +795,48 @@ async def test_observational_runtime_failure_degrades_but_continues(caplog):
       ),
   )
   runner = testing_utils.InMemoryRunner(app=app)
+
+  class _ObservationWriterStub:
+
+    def __init__(self, **_kwargs):
+      pass
+
+    async def maybe_write_observation(self, **kwargs):
+      return _observation(
+          session_id=kwargs['current_task_state'].session_id,
+          observation_id='obs-failure',
+          start_seq=kwargs['recent_raw_turns'][0].seq,
+          end_seq=kwargs['recent_raw_turns'][-1].seq,
+      )
+
+  class _ReflectionWriterStub:
+
+    def __init__(self, **_kwargs):
+      pass
+
+    async def maybe_write_reflection(self, **_kwargs):
+      raise RuntimeError('reflection path failed')
+
+  class _TaskStateUpdaterStub:
+
+    def __init__(self, **_kwargs):
+      pass
+
+    async def update_from_tool_run(self, **_kwargs):
+      raise RuntimeError('tool-run task-state update failed')
+
+    async def update_from_observation(self, **_kwargs):
+      raise RuntimeError('observation task-state update failed')
+
+  monkeypatch.setattr(
+      'google.adk.runners.ObservationWriter', _ObservationWriterStub
+  )
+  monkeypatch.setattr(
+      'google.adk.runners.ReflectionWriter', _ReflectionWriterStub
+  )
+  monkeypatch.setattr(
+      'google.adk.runners.TaskStateUpdater', _TaskStateUpdaterStub
+  )
 
   events = []
   with caplog.at_level(logging.ERROR, logger='google_adk'):
@@ -582,8 +856,12 @@ async def test_observational_runtime_failure_degrades_but_continues(caplog):
       for record in caplog.records
       if (
           record.levelno == logging.ERROR
-          and 'Observational memory deterministic runtime failed for '
-          'session_id=' in record.getMessage()
+          and (
+              'task-state update from tool-run failed' in record.getMessage()
+              or 'task-state update from observation failed'
+              in record.getMessage()
+              or 'reflection generation failed' in record.getMessage()
+          )
       )
   ]
-  assert degradation_records
+  assert len(degradation_records) >= 3

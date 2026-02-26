@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import inspect
+import json
 import logging
 from pathlib import Path
 import queue
@@ -47,9 +48,12 @@ from .artifacts.in_memory_artifact_service import InMemoryArtifactService
 from .auth.credential_service.base_credential_service import BaseCredentialService
 from .code_executors.built_in_code_executor import BuiltInCodeExecutor
 from .compaction.config import HybridEventsCompactionConfig
+from .compaction.models import Observation
+from .compaction.models import PatchCompaction
 from .compaction.models import TaskStateAnchor
 from .compaction.models import ToolRunCompaction
 from .compaction.writers.observation_writer import ObservationWriter
+from .compaction.writers.observation_writer import RawTurn
 from .compaction.writers.reflection_writer import ReflectionWriter
 from .compaction.writers.task_state_updater import TaskStateUpdater
 from .errors.session_not_found_error import SessionNotFoundError
@@ -146,6 +150,43 @@ def _extract_tool_command_from_event(event: Event) -> str:
         return command.strip()
 
   return function_response.name or ''
+
+
+def _estimate_tokens(text: str) -> int:
+  """Returns a rough token estimate with a 4 chars/token heuristic."""
+  if not text:
+    return 0
+  return max(1, len(text) // 4)
+
+
+def _json_dumps_fallback(value: Any) -> str:
+  """Serializes payloads for prompt context with a safe fallback."""
+  try:
+    return json.dumps(value, sort_keys=True)
+  except TypeError:
+    return repr(value)
+
+
+def _extract_raw_turn_text(event: Event) -> str:
+  """Extracts canonical text content from one event for observation input."""
+  if not event.content or not event.content.parts:
+    return ''
+
+  text_parts: list[str] = []
+  for part in event.content.parts:
+    if part.text:
+      text_parts.append(part.text)
+    if part.function_call:
+      text_parts.append(
+          f'function_call:{part.function_call.name} '
+          f'{_json_dumps_fallback(part.function_call.args)}'
+      )
+    if part.function_response:
+      text_parts.append(
+          f'function_response:{part.function_response.name} '
+          f'{_json_dumps_fallback(part.function_response.response)}'
+      )
+  return '\n'.join(text_parts).strip()
 
 
 class Runner:
@@ -909,6 +950,7 @@ class Runner:
       session: Session,
       invocation_id: str,
       config: HybridEventsCompactionConfig,
+      max_items: int = 8,
   ) -> list[ToolRunCompaction]:
     """Returns deterministic tool-run compactions from one invocation."""
     tool_run_compactions: list[ToolRunCompaction] = []
@@ -917,13 +959,60 @@ class Runner:
         continue
       if not event.get_function_responses():
         continue
-      tool_run_compaction = await config.compaction_service.get_tool_run_compaction(
-          event.id
+      tool_run_compaction = (
+          await config.compaction_service.get_tool_run_compaction(event.id)
       )
       if tool_run_compaction is None:
         continue
       tool_run_compactions.append(tool_run_compaction)
-    return tool_run_compactions
+    return tool_run_compactions[-max_items:]
+
+  async def _get_recent_patch_compactions_for_invocation(
+      self,
+      *,
+      session: Session,
+      invocation_id: str,
+      config: HybridEventsCompactionConfig,
+      max_items: int = 8,
+  ) -> list[PatchCompaction]:
+    """Returns deterministic patch compactions from one invocation."""
+    patch_compactions: list[PatchCompaction] = []
+    for event in session.events:
+      if event.invocation_id != invocation_id:
+        continue
+      patch_compaction = await config.compaction_service.get_patch_compaction(
+          event.id
+      )
+      if patch_compaction is None:
+        continue
+      patch_compactions.append(patch_compaction)
+    return patch_compactions[-max_items:]
+
+  def _build_recent_raw_turns(
+      self,
+      *,
+      session: Session,
+      max_turns: int = 12,
+  ) -> list[RawTurn]:
+    """Builds recent raw turns from session events for observation writer."""
+    raw_turns: list[RawTurn] = []
+    for seq, event in enumerate(session.events, start=1):
+      if event.partial:
+        continue
+      raw_text = _extract_raw_turn_text(event)
+      if not raw_text:
+        continue
+      raw_turns.append(
+          RawTurn(
+              session_id=session.id,
+              seq=seq,
+              event_id=event.id,
+              author=event.author,
+              text=raw_text,
+              raw_tokens_est=_estimate_tokens(raw_text),
+          )
+      )
+    return raw_turns[-max_turns:]
 
   def _bootstrap_task_state(self, *, session_id: str) -> TaskStateAnchor:
     """Builds a minimal deterministic task-state baseline."""
@@ -944,7 +1033,7 @@ class Runner:
       session: Session,
       invocation_context: InvocationContext,
   ) -> None:
-    """Runs minimal observational memory runtime when explicitly triggered."""
+    """Runs observational memory runtime when explicitly triggered."""
     runtime = self._get_or_create_observational_memory_runtime(session)
     if runtime is None:
       return
@@ -958,49 +1047,158 @@ class Runner:
     if config is None:
       return
 
+    invocation_id = invocation_context.invocation_id
+    tool_run_compactions: list[ToolRunCompaction] = []
     try:
       tool_run_compactions = (
           await self._get_recent_tool_run_compactions_for_invocation(
               session=session,
-              invocation_id=invocation_context.invocation_id,
+              invocation_id=invocation_id,
               config=config,
           )
       )
-      if not tool_run_compactions:
-        logger.debug(
-            'Observational memory runtime trigger received for session_id=%s, '
-            'invocation_id=%s but no deterministic tool-run compactions were '
-            'available for update.',
-            session.id,
-            invocation_context.invocation_id,
-        )
-        return
+    except Exception:
+      logger.exception(
+          'Failed to load tool-run compactions for session_id=%s, '
+          'invocation_id=%s.',
+          session.id,
+          invocation_id,
+      )
 
+    patch_compactions: list[PatchCompaction] = []
+    try:
+      patch_compactions = (
+          await self._get_recent_patch_compactions_for_invocation(
+              session=session,
+              invocation_id=invocation_id,
+              config=config,
+          )
+      )
+    except Exception:
+      logger.exception(
+          'Failed to load patch compactions for session_id=%s, '
+          'invocation_id=%s.',
+          session.id,
+          invocation_id,
+      )
+
+    task_state: TaskStateAnchor
+    try:
       task_state = await config.compaction_service.get_task_state(session.id)
       if task_state is None:
         task_state = self._bootstrap_task_state(session_id=session.id)
+    except Exception:
+      logger.exception(
+          'Failed to load task-state for observational runtime '
+          'session_id=%s, invocation_id=%s. Falling back to bootstrap state.',
+          session.id,
+          invocation_id,
+      )
+      task_state = self._bootstrap_task_state(session_id=session.id)
 
-      for tool_run_compaction in tool_run_compactions:
+    for tool_run_compaction in tool_run_compactions:
+      try:
         task_state = await runtime.task_state_updater.update_from_tool_run(
             tool_run_compaction=tool_run_compaction,
             current_task_state=task_state,
         )
+      except Exception:
+        logger.exception(
+            'Observational runtime task-state update from tool-run failed for '
+            'session_id=%s, invocation_id=%s, event_id=%s.',
+            session.id,
+            invocation_id,
+            tool_run_compaction.event_id,
+        )
+
+    raw_turns = self._build_recent_raw_turns(session=session)
+    last_observation = None
+    recent_observations: list[Observation] = []
+    try:
+      recent_observations = await config.compaction_service.get_observations(
+          session.id
+      )
+      if recent_observations:
+        last_observation = recent_observations[-1]
     except Exception:
       logger.exception(
-          'Observational memory deterministic runtime failed for '
+          'Failed to load recent observations for session_id=%s, '
+          'invocation_id=%s.',
+          session.id,
+          invocation_id,
+      )
+
+    observation = None
+    try:
+      observation = await runtime.observation_writer.maybe_write_observation(
+          recent_raw_turns=raw_turns,
+          recent_tool_run_compactions=tool_run_compactions,
+          recent_patch_compactions=patch_compactions,
+          current_task_state=task_state,
+          last_observation=last_observation,
+          episode_closed=True,
+      )
+    except Exception:
+      logger.exception(
+          'Observational runtime observation generation failed for '
           'session_id=%s, invocation_id=%s.',
           session.id,
-          invocation_context.invocation_id,
+          invocation_id,
       )
-      return
+
+    if observation is not None:
+      recent_observations.append(observation)
+      try:
+        task_state = await runtime.task_state_updater.update_from_observation(
+            observation=observation,
+            current_task_state=task_state,
+            use_llm=False,
+        )
+      except Exception:
+        logger.exception(
+            'Observational runtime task-state update from observation failed '
+            'for session_id=%s, invocation_id=%s, observation_id=%s.',
+            session.id,
+            invocation_id,
+            observation.observation_id,
+        )
+
+    latest_reflection = None
+    try:
+      latest_reflection = await config.compaction_service.get_latest_reflection(
+          session.id
+      )
+    except Exception:
+      logger.exception(
+          'Failed to load latest reflection for session_id=%s, '
+          'invocation_id=%s.',
+          session.id,
+          invocation_id,
+      )
+
+    try:
+      await runtime.reflection_writer.maybe_write_reflection(
+          recent_observations=recent_observations,
+          current_task_state=task_state,
+          latest_reflection=latest_reflection,
+      )
+    except Exception:
+      logger.exception(
+          'Observational runtime reflection generation failed for '
+          'session_id=%s, invocation_id=%s.',
+          session.id,
+          invocation_id,
+      )
 
     logger.debug(
-        'Observational memory runtime trigger received for session_id=%s, '
-        'invocation_id=%s. Deterministic task-state updates completed for '
-        '%d tool-run compact artifacts.',
+        'Observational memory runtime completed for session_id=%s, '
+        'invocation_id=%s. raw_turns=%d tool_compactions=%d '
+        'patch_compactions=%d.',
         session.id,
-        invocation_context.invocation_id,
+        invocation_id,
+        len(raw_turns),
         len(tool_run_compactions),
+        len(patch_compactions),
     )
 
   async def _run_deterministic_compaction_for_event(
