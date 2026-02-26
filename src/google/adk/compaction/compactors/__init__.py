@@ -16,10 +16,12 @@
 
 from .base import BaseToolRunCompactor
 from .generic import GenericToolRunCompactor
+from .pytest_compactor import PytestCompactor
 from .registry import ToolRunCompactorRegistry
 
 __all__ = [
     'BaseToolRunCompactor',
     'GenericToolRunCompactor',
+    'PytestCompactor',
     'ToolRunCompactorRegistry',
 ]

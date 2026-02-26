@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from .base import BaseToolRunCompactor
 from .generic import GenericToolRunCompactor
+from .pytest_compactor import PytestCompactor
 
 
 class ToolRunCompactorRegistry:
@@ -23,7 +24,9 @@ class ToolRunCompactorRegistry:
 
   def __init__(self, fallback: BaseToolRunCompactor | None = None):
     self._fallback = fallback or GenericToolRunCompactor()
-    self._registrations: list[tuple[str, BaseToolRunCompactor]] = []
+    self._registrations: list[tuple[str, BaseToolRunCompactor]] = [
+        ('pytest', PytestCompactor())
+    ]
 
   def register(self, command_match: str, compactor: BaseToolRunCompactor) -> None:
     """Registers a compactor for command substring matching."""
@@ -35,7 +38,7 @@ class ToolRunCompactorRegistry:
   def get_compactor(self, command: str) -> BaseToolRunCompactor:
     """Returns the first registered compactor matching the command text."""
     normalized = command.lower()
-    for matcher, compactor in self._registrations:
+    for matcher, compactor in reversed(self._registrations):
       if matcher in normalized:
         return compactor
     return self._fallback

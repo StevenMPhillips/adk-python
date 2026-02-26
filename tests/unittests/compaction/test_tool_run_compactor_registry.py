@@ -14,6 +14,7 @@
 
 from google.adk.compaction.compactors.base import BaseToolRunCompactor
 from google.adk.compaction.compactors.generic import GenericToolRunCompactor
+from google.adk.compaction.compactors.pytest_compactor import PytestCompactor
 from google.adk.compaction.compactors.registry import ToolRunCompactorRegistry
 from google.adk.compaction.models import ToolRunCompaction
 from google.adk.events.event import Event
@@ -44,6 +45,13 @@ def test_registry_falls_back_to_generic_compactor_for_unknown_command():
   registry = ToolRunCompactorRegistry(fallback=fallback)
 
   assert registry.get_compactor('unknown-tool --flag') is fallback
+
+
+def test_registry_uses_pytest_compactor_for_pytest_commands_by_default():
+  registry = ToolRunCompactorRegistry()
+
+  assert isinstance(registry.get_compactor('python -m pytest -q'),
+                    PytestCompactor)
 
 
 def test_registry_rejects_empty_matcher():
