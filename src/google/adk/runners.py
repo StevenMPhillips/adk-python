@@ -47,6 +47,8 @@ from .artifacts.in_memory_artifact_service import InMemoryArtifactService
 from .auth.credential_service.base_credential_service import BaseCredentialService
 from .code_executors.built_in_code_executor import BuiltInCodeExecutor
 from .compaction.config import HybridEventsCompactionConfig
+from .compaction.models import TaskStateAnchor
+from .compaction.models import ToolRunCompaction
 from .compaction.writers.observation_writer import ObservationWriter
 from .compaction.writers.reflection_writer import ReflectionWriter
 from .compaction.writers.task_state_updater import TaskStateUpdater
@@ -901,32 +903,104 @@ class Runner:
         run_config.custom_metadata.get('trigger_observational_memory_runtime')
     )
 
+  async def _get_recent_tool_run_compactions_for_invocation(
+      self,
+      *,
+      session: Session,
+      invocation_id: str,
+      config: HybridEventsCompactionConfig,
+  ) -> list[ToolRunCompaction]:
+    """Returns deterministic tool-run compactions from one invocation."""
+    tool_run_compactions: list[ToolRunCompaction] = []
+    for event in session.events:
+      if event.invocation_id != invocation_id:
+        continue
+      if not event.get_function_responses():
+        continue
+      tool_run_compaction = await config.compaction_service.get_tool_run_compaction(
+          event.id
+      )
+      if tool_run_compaction is None:
+        continue
+      tool_run_compactions.append(tool_run_compaction)
+    return tool_run_compactions
+
+  def _bootstrap_task_state(self, *, session_id: str) -> TaskStateAnchor:
+    """Builds a minimal deterministic task-state baseline."""
+    return TaskStateAnchor(
+        session_id=session_id,
+        objective='Track current session progress.',
+        constraints=[],
+        hypotheses=[],
+        known_failures=[],
+        current_plan=[],
+        next_steps=[],
+        last_updated_seq=0,
+    )
+
   async def _maybe_run_observational_memory_runtime(
       self,
       *,
       session: Session,
       invocation_context: InvocationContext,
   ) -> None:
-    """First-slice hook for observational-memory runtime integration.
-
-    This intentionally keeps runtime execution as a no-op while wiring lazy
-    writer initialization behind config and trigger gates.
-    """
+    """Runs minimal observational memory runtime when explicitly triggered."""
     runtime = self._get_or_create_observational_memory_runtime(session)
     if runtime is None:
       return
-    del runtime
 
     if not self._should_trigger_observational_memory_runtime(
         invocation_context
     ):
       return
 
+    config = self._get_observational_memory_compaction_config()
+    if config is None:
+      return
+
+    try:
+      tool_run_compactions = (
+          await self._get_recent_tool_run_compactions_for_invocation(
+              session=session,
+              invocation_id=invocation_context.invocation_id,
+              config=config,
+          )
+      )
+      if not tool_run_compactions:
+        logger.debug(
+            'Observational memory runtime trigger received for session_id=%s, '
+            'invocation_id=%s but no deterministic tool-run compactions were '
+            'available for update.',
+            session.id,
+            invocation_context.invocation_id,
+        )
+        return
+
+      task_state = await config.compaction_service.get_task_state(session.id)
+      if task_state is None:
+        task_state = self._bootstrap_task_state(session_id=session.id)
+
+      for tool_run_compaction in tool_run_compactions:
+        task_state = await runtime.task_state_updater.update_from_tool_run(
+            tool_run_compaction=tool_run_compaction,
+            current_task_state=task_state,
+        )
+    except Exception:
+      logger.exception(
+          'Observational memory deterministic runtime failed for '
+          'session_id=%s, invocation_id=%s.',
+          session.id,
+          invocation_context.invocation_id,
+      )
+      return
+
     logger.debug(
         'Observational memory runtime trigger received for session_id=%s, '
-        'invocation_id=%s. Execution path deferred in first integration slice.',
+        'invocation_id=%s. Deterministic task-state updates completed for '
+        '%d tool-run compact artifacts.',
         session.id,
         invocation_context.invocation_id,
+        len(tool_run_compactions),
     )
 
   async def _run_deterministic_compaction_for_event(

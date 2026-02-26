@@ -345,14 +345,33 @@ async def test_observational_runtime_not_initialized_when_flag_disabled(
 
 
 @pytest.mark.asyncio
-async def test_observational_runtime_initializes_when_flag_enabled_and_is_noop(
+async def test_observational_runtime_updates_task_state_when_triggered(
     monkeypatch,
 ):
-  model = testing_utils.MockModel.create(['response one', 'response two'])
+  tool = FunctionTool(func=_run_shell)
+  model = testing_utils.MockModel.create([
+      testing_utils.LlmResponse(
+          content=testing_utils.ModelContent(
+              parts=[
+                  Part(
+                      function_call=FunctionCall(
+                          name=tool.name,
+                          args={'command': 'pytest tests/unittests'},
+                      )
+                  )
+              ]
+          )
+      ),
+      testing_utils.LlmResponse(
+          content=testing_utils.ModelContent(
+              parts=[Part(text='tool invocation completed')]
+          )
+      ),
+  ])
   compaction_service = _NoOpCheckCompactionService()
   app = App(
       name='observational_runtime_enabled_app',
-      root_agent=LlmAgent(name='agent', model=model),
+      root_agent=LlmAgent(name='agent', model=model, tools=[tool]),
       events_compaction_config=HybridEventsCompactionConfig(
           compaction_service=compaction_service,
           tool_run_compactor_registry=ToolRunCompactorRegistry(),
@@ -364,22 +383,32 @@ async def test_observational_runtime_initializes_when_flag_enabled_and_is_noop(
   )
   runner = testing_utils.InMemoryRunner(app=app)
 
-  construction_calls = {'observation': 0, 'reflection': 0, 'task_state': 0}
+  runtime_calls = {
+      'observation': 0,
+      'reflection': 0,
+      'task_state': 0,
+      'update_from_tool_run': 0,
+  }
 
   class _ObservationWriterStub:
 
     def __init__(self, **_kwargs):
-      construction_calls['observation'] += 1
+      runtime_calls['observation'] += 1
 
   class _ReflectionWriterStub:
 
     def __init__(self, **_kwargs):
-      construction_calls['reflection'] += 1
+      runtime_calls['reflection'] += 1
 
   class _TaskStateUpdaterStub:
 
     def __init__(self, **_kwargs):
-      construction_calls['task_state'] += 1
+      runtime_calls['task_state'] += 1
+
+    async def update_from_tool_run(self, **kwargs):
+      assert kwargs['tool_run_compaction'].event_id
+      runtime_calls['update_from_tool_run'] += 1
+      return kwargs['current_task_state']
 
   monkeypatch.setattr(
       'google.adk.runners.ObservationWriter', _ObservationWriterStub
@@ -391,27 +420,170 @@ async def test_observational_runtime_initializes_when_flag_enabled_and_is_noop(
       'google.adk.runners.TaskStateUpdater', _TaskStateUpdaterStub
   )
 
-  first_events = await runner.run_async('first message')
-  assert 'response one' in _event_texts(first_events)
-
-  session = runner.session
-  second_events = []
+  events = []
   async for event in runner.runner.run_async(
-      user_id=session.user_id,
-      session_id=session.id,
-      new_message=testing_utils.UserContent('second message'),
+      user_id=runner.session.user_id,
+      session_id=runner.session.id,
+      new_message=testing_utils.UserContent('run the shell tool'),
       run_config=RunConfig(
           custom_metadata={'trigger_observational_memory_runtime': True}
       ),
   ):
-    second_events.append(event)
+    events.append(event)
 
-  assert 'response two' in _event_texts(second_events)
-  assert construction_calls == {
+  assert 'tool invocation completed' in _event_texts(events)
+  assert runtime_calls == {
       'observation': 1,
       'reflection': 1,
       'task_state': 1,
+      'update_from_tool_run': 1,
   }
   assert compaction_service.save_observation_calls == 0
   assert compaction_service.save_reflection_calls == 0
   assert compaction_service.save_task_state_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_observational_runtime_noop_when_runtime_trigger_not_set(
+    monkeypatch,
+):
+  tool = FunctionTool(func=_run_shell)
+  model = testing_utils.MockModel.create([
+      testing_utils.LlmResponse(
+          content=testing_utils.ModelContent(
+              parts=[
+                  Part(
+                      function_call=FunctionCall(
+                          name=tool.name,
+                          args={'command': 'pytest tests/unittests'},
+                      )
+                  )
+              ]
+          )
+      ),
+      testing_utils.LlmResponse(
+          content=testing_utils.ModelContent(
+              parts=[Part(text='tool invocation completed')]
+          )
+      ),
+  ])
+  compaction_service = _NoOpCheckCompactionService()
+  app = App(
+      name='observational_runtime_no_trigger_app',
+      root_agent=LlmAgent(name='agent', model=model, tools=[tool]),
+      events_compaction_config=HybridEventsCompactionConfig(
+          compaction_service=compaction_service,
+          tool_run_compactor_registry=ToolRunCompactorRegistry(),
+          patch_compactor=PatchCompactor(),
+          compaction_interval=999,
+          overlap_size=0,
+          enable_observational_memory=True,
+      ),
+  )
+  runner = testing_utils.InMemoryRunner(app=app)
+
+  runtime_calls = {
+      'observation': 0,
+      'reflection': 0,
+      'task_state': 0,
+      'update_from_tool_run': 0,
+  }
+
+  class _ObservationWriterStub:
+
+    def __init__(self, **_kwargs):
+      runtime_calls['observation'] += 1
+
+  class _ReflectionWriterStub:
+
+    def __init__(self, **_kwargs):
+      runtime_calls['reflection'] += 1
+
+  class _TaskStateUpdaterStub:
+
+    def __init__(self, **_kwargs):
+      runtime_calls['task_state'] += 1
+
+    async def update_from_tool_run(self, **_kwargs):
+      runtime_calls['update_from_tool_run'] += 1
+      pytest.fail('Task-state deterministic update should not run.')
+
+  monkeypatch.setattr(
+      'google.adk.runners.ObservationWriter', _ObservationWriterStub
+  )
+  monkeypatch.setattr(
+      'google.adk.runners.ReflectionWriter', _ReflectionWriterStub
+  )
+  monkeypatch.setattr(
+      'google.adk.runners.TaskStateUpdater', _TaskStateUpdaterStub
+  )
+
+  events = await runner.run_async('run the shell tool')
+
+  assert 'tool invocation completed' in _event_texts(events)
+  assert runtime_calls == {
+      'observation': 1,
+      'reflection': 1,
+      'task_state': 1,
+      'update_from_tool_run': 0,
+  }
+
+
+@pytest.mark.asyncio
+async def test_observational_runtime_failure_degrades_but_continues(caplog):
+  tool = FunctionTool(func=_run_shell)
+  model = testing_utils.MockModel.create([
+      testing_utils.LlmResponse(
+          content=testing_utils.ModelContent(
+              parts=[
+                  Part(
+                      function_call=FunctionCall(
+                          name=tool.name,
+                          args={'command': 'pytest tests/unittests'},
+                      )
+                  )
+              ]
+          )
+      ),
+      testing_utils.LlmResponse(
+          content=testing_utils.ModelContent(parts=[Part(text='done')])
+      ),
+  ])
+  compaction_service = _FailingCompactionService(fail_get_task_state=True)
+  app = App(
+      name='observational_runtime_failure_app',
+      root_agent=LlmAgent(name='agent', model=model, tools=[tool]),
+      events_compaction_config=HybridEventsCompactionConfig(
+          compaction_service=compaction_service,
+          tool_run_compactor_registry=ToolRunCompactorRegistry(),
+          patch_compactor=PatchCompactor(),
+          compaction_interval=999,
+          overlap_size=0,
+          enable_observational_memory=True,
+      ),
+  )
+  runner = testing_utils.InMemoryRunner(app=app)
+
+  events = []
+  with caplog.at_level(logging.ERROR, logger='google_adk'):
+    async for event in runner.runner.run_async(
+        user_id=runner.session.user_id,
+        session_id=runner.session.id,
+        new_message=testing_utils.UserContent('run the shell tool'),
+        run_config=RunConfig(
+            custom_metadata={'trigger_observational_memory_runtime': True}
+        ),
+    ):
+      events.append(event)
+
+  assert 'done' in _event_texts(events)
+  degradation_records = [
+      record
+      for record in caplog.records
+      if (
+          record.levelno == logging.ERROR
+          and 'Observational memory deterministic runtime failed for '
+          'session_id=' in record.getMessage()
+      )
+  ]
+  assert degradation_records
