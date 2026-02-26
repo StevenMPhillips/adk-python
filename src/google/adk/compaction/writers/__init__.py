@@ -14,5 +14,6 @@
 
 from .observation_writer import ObservationWriter
 from .observation_writer import RawTurn
+from .reflection_writer import ReflectionWriter
 
-__all__ = ['ObservationWriter', 'RawTurn']
+__all__ = ['ObservationWriter', 'RawTurn', 'ReflectionWriter']
