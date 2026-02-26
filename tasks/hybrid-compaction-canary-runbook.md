@@ -80,6 +80,14 @@ Example CI/local command:
 ./scripts/run_hybrid_canary_soak.sh --iterations 30 --stop-on-failure
 ```
 
+Practical local drill commands (faster than promotion gate, not a release
+threshold):
+
+```bash
+./scripts/run_hybrid_canary_soak.sh --iterations 12 --stop-on-failure
+./scripts/run_hybrid_soak_load.sh --iterations 12 --workers 3 --stop-on-failure
+```
+
 Recommended promotion threshold:
 
 - **PASS:** `run_count=30`, `pass_count=30`, `fail_count=0`
@@ -240,6 +248,17 @@ Run rollback when kill-switch is insufficient, or when correctness risk remains.
 ```bash
 git log --oneline -n 20
 git checkout <last-known-good-sha>
+```
+
+For local rollback drills, capture the original branch first and return to it
+after validation:
+
+```bash
+orig_branch="$(git rev-parse --abbrev-ref HEAD)"
+git checkout --detach <last-known-good-sha>
+# run rollback verification tests
+git checkout "${orig_branch}"
+git rev-parse --abbrev-ref HEAD
 ```
 
 ```bash
