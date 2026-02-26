@@ -28,6 +28,7 @@ from typing import Union
 
 from google.genai import types
 from google.genai.errors import ClientError
+from pydantic import BaseModel
 from typing_extensions import override
 
 from ..utils._google_client_headers import get_tracking_headers
@@ -56,6 +57,43 @@ On how to mitigate this issue, please refer to:
 
 https://google.github.io/adk-docs/agents/models/#error-code-429-resource_exhausted
 """
+
+
+def _strip_unsupported_gemini_schema_fields(schema: Any) -> Any:
+  """Recursively removes JSON-schema fields unsupported by Gemini API."""
+  if isinstance(schema, list):
+    return [
+        _strip_unsupported_gemini_schema_fields(item) for item in schema
+    ]
+  if not isinstance(schema, dict):
+    return schema
+
+  sanitized_schema: dict[str, Any] = {}
+  for key, value in schema.items():
+    if key in ('additionalProperties', 'additional_properties'):
+      continue
+    sanitized_schema[key] = _strip_unsupported_gemini_schema_fields(value)
+  return sanitized_schema
+
+
+def _sanitize_response_schema_for_gemini(
+    response_schema: types.SchemaUnion,
+) -> types.SchemaUnion:
+  """Converts response schema into Gemini-safe JSON schema."""
+  if isinstance(response_schema, dict):
+    schema_dict = copy.deepcopy(response_schema)
+  elif isinstance(response_schema, type) and issubclass(
+      response_schema, BaseModel
+  ):
+    schema_dict = response_schema.model_json_schema()
+  elif hasattr(response_schema, 'model_dump'):
+    schema_dict = copy.deepcopy(
+        response_schema.model_dump(exclude_none=True, mode='json')
+    )
+  else:
+    return response_schema
+
+  return _strip_unsupported_gemini_schema_fields(schema_dict)
 
 
 class _ResourceExhaustedError(ClientError):
@@ -433,6 +471,12 @@ class Gemini(BaseLlm):
       # Using API key from Google AI Studio to call model doesn't support labels.
       if llm_request.config:
         llm_request.config.labels = None
+        if llm_request.config.response_schema:
+          llm_request.config.response_schema = (
+              _sanitize_response_schema_for_gemini(
+                  llm_request.config.response_schema
+              )
+          )
 
       if llm_request.contents:
         for content in llm_request.contents:

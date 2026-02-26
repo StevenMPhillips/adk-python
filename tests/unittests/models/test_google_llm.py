@@ -37,6 +37,8 @@ from google.genai import types
 from google.genai.errors import ClientError
 from google.genai.types import Content
 from google.genai.types import Part
+from pydantic import BaseModel
+from pydantic import ConfigDict
 import pytest
 
 
@@ -808,6 +810,58 @@ async def test_preprocess_request_handles_backend_specific_fields(
     assert file_part.file_data.display_name == expected_file_display_name
     assert inline_part.inline_data.display_name == expected_inline_display_name
     assert llm_request_with_files.config.labels == expected_labels
+
+
+class _SchemaInner(BaseModel):
+  model_config = ConfigDict(extra='forbid')
+
+  value: str
+
+
+class _SchemaOuter(BaseModel):
+  model_config = ConfigDict(extra='forbid')
+
+  items: list[_SchemaInner]
+
+
+def _contains_additional_properties(schema: object) -> bool:
+  if isinstance(schema, list):
+    return any(_contains_additional_properties(item) for item in schema)
+  if not isinstance(schema, dict):
+    return False
+
+  if (
+      'additionalProperties' in schema
+      or 'additional_properties' in schema
+  ):
+    return True
+
+  return any(
+      _contains_additional_properties(value) for value in schema.values()
+  )
+
+
+@pytest.mark.asyncio
+async def test_preprocess_request_sanitizes_response_schema_for_gemini_api(
+    gemini_llm: Gemini,
+):
+  llm_request_with_schema = LlmRequest(
+      model='gemini-1.5-flash',
+      contents=[
+          Content(role='user', parts=[Part.from_text(text='Return JSON')])
+      ],
+      config=types.GenerateContentConfig(response_schema=_SchemaOuter),
+  )
+
+  with mock.patch.object(
+      Gemini, '_api_backend', new_callable=mock.PropertyMock
+  ) as mock_backend:
+    mock_backend.return_value = GoogleLLMVariant.GEMINI_API
+    await gemini_llm._preprocess_request(llm_request_with_schema)
+
+  response_schema = llm_request_with_schema.config.response_schema
+  assert isinstance(response_schema, dict)
+  assert not _contains_additional_properties(response_schema)
 
 
 @pytest.mark.asyncio
