@@ -53,10 +53,27 @@ def _sample_item(text: str, ref_id: str) -> EvidencedItem:
   return EvidencedItem(text=text, evidence_refs=[_sample_evidence(ref_id)])
 
 
+@pytest.fixture
+async def sqlite_service_factory():
+  services: list[SqliteCompactionService] = []
+
+  def _factory(db_path) -> SqliteCompactionService:
+    service = SqliteCompactionService(str(db_path))
+    services.append(service)
+    return service
+
+  yield _factory
+
+  for service in services:
+    await service.close()
+
+
 @pytest.mark.asyncio
-async def test_sqlite_service_save_and_get_all_artifact_types(tmp_path):
+async def test_sqlite_service_save_and_get_all_artifact_types(
+    tmp_path, sqlite_service_factory
+):
   db_path = tmp_path / 'compactions.db'
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   tool_run = ToolRunCompaction(
       event_id='evt-tool-1',
@@ -149,9 +166,11 @@ async def test_sqlite_service_save_and_get_all_artifact_types(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sqlite_service_queries_are_indexed_and_return_matches(tmp_path):
+async def test_sqlite_service_queries_are_indexed_and_return_matches(
+    tmp_path, sqlite_service_factory
+):
   db_path = tmp_path / 'compactions.db'
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   matching_tool = ToolRunCompaction(
       event_id='evt-tool-file',
@@ -221,9 +240,11 @@ async def test_sqlite_service_queries_are_indexed_and_return_matches(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sqlite_service_observations_filter_by_seq_range(tmp_path):
+async def test_sqlite_service_observations_filter_by_seq_range(
+    tmp_path, sqlite_service_factory
+):
   db_path = tmp_path / 'compactions.db'
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   first = Observation(
       observation_id='obs-1',
@@ -272,7 +293,9 @@ async def test_sqlite_service_observations_filter_by_seq_range(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sqlite_service_migrates_from_metadata_version_zero(tmp_path):
+async def test_sqlite_service_migrates_from_metadata_version_zero(
+    tmp_path, sqlite_service_factory
+):
   db_path = tmp_path / 'compactions.db'
   with sqlite3.connect(db_path) as conn:
     conn.execute(
@@ -284,7 +307,7 @@ async def test_sqlite_service_migrates_from_metadata_version_zero(tmp_path):
     )
     conn.commit()
 
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   tool_run = ToolRunCompaction(
       event_id='evt-tool-1',
@@ -321,10 +344,10 @@ async def test_sqlite_service_migrates_from_metadata_version_zero(tmp_path):
 
 @pytest.mark.asyncio
 async def test_save_tool_run_compaction_rolls_back_on_related_insert_failure(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, sqlite_service_factory
 ):
   db_path = tmp_path / 'compactions.db'
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   original = ToolRunCompaction(
       event_id='evt-tool-rollback',
@@ -376,10 +399,10 @@ async def test_save_tool_run_compaction_rolls_back_on_related_insert_failure(
 
 @pytest.mark.asyncio
 async def test_save_patch_compaction_rolls_back_on_path_insert_failure(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, sqlite_service_factory
 ):
   db_path = tmp_path / 'compactions.db'
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   original = PatchCompaction(
       event_id='evt-patch-rollback',
@@ -420,9 +443,11 @@ async def test_save_patch_compaction_rolls_back_on_path_insert_failure(
 
 
 @pytest.mark.asyncio
-async def test_single_row_getter_raises_clear_error_for_corrupt_json(tmp_path):
+async def test_single_row_getter_raises_clear_error_for_corrupt_json(
+    tmp_path, sqlite_service_factory
+):
   db_path = tmp_path / 'compactions.db'
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   tool_run = ToolRunCompaction(
       event_id='evt-corrupt-single',
@@ -453,10 +478,10 @@ async def test_single_row_getter_raises_clear_error_for_corrupt_json(tmp_path):
 
 @pytest.mark.asyncio
 async def test_multi_row_queries_skip_corrupt_json_and_log_warning(
-    tmp_path, caplog
+    tmp_path, caplog, sqlite_service_factory
 ):
   db_path = tmp_path / 'compactions.db'
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   observation = Observation(
       observation_id='obs-valid',
@@ -537,7 +562,7 @@ async def test_multi_row_queries_skip_corrupt_json_and_log_warning(
 
 @pytest.mark.asyncio
 async def test_sqlite_service_reuses_single_aiosqlite_connection(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, sqlite_service_factory
 ):
   db_path = tmp_path / 'compactions.db'
   connect_call_count = 0
@@ -552,7 +577,7 @@ async def test_sqlite_service_reuses_single_aiosqlite_connection(
       'google.adk.compaction.storage.sqlite_compaction_service.aiosqlite.connect',
       _counting_connect,
   )
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   tool_run = ToolRunCompaction(
       event_id='evt-reuse-1',
@@ -577,8 +602,10 @@ async def test_sqlite_service_reuses_single_aiosqlite_connection(
 
 
 @pytest.mark.asyncio
-async def test_is_migration_needed_async_matches_sync_api(tmp_path):
-  missing_db = SqliteCompactionService(str(tmp_path / 'missing.db'))
+async def test_is_migration_needed_async_matches_sync_api(
+    tmp_path, sqlite_service_factory
+):
+  missing_db = sqlite_service_factory(tmp_path / 'missing.db')
   assert missing_db.is_migration_needed() is False
   assert await missing_db.is_migration_needed_async() is False
 
@@ -593,17 +620,17 @@ async def test_is_migration_needed_async_matches_sync_api(tmp_path):
     )
     conn.commit()
 
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
   assert service.is_migration_needed() is True
   assert await service.is_migration_needed_async() is True
 
 
 @pytest.mark.asyncio
 async def test_cleanup_artifacts_evicts_records_by_age_and_cascades_indexes(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, sqlite_service_factory
 ):
   db_path = tmp_path / 'compactions.db'
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   timestamps = iter([
       100.0,
@@ -771,7 +798,9 @@ async def test_cleanup_artifacts_evicts_records_by_age_and_cascades_indexes(
   assert await service.get_patch_compaction('evt-old-patch') is None
   assert await service.get_patch_compaction('evt-new-patch') == new_patch
   assert await service.get_observations('session-a') == [new_observation]
-  assert await service.get_observations('session-b') == [other_session_observation]
+  assert await service.get_observations('session-b') == [
+      other_session_observation
+  ]
   assert await service.get_latest_reflection('session-a') == new_reflection
   assert await service.get_task_state('session-a') is None
   assert await service.get_task_state('session-b') == new_task_state
@@ -796,9 +825,11 @@ async def test_cleanup_artifacts_evicts_records_by_age_and_cascades_indexes(
 
 
 @pytest.mark.asyncio
-async def test_cleanup_artifacts_scoped_by_session_respects_count_policy(tmp_path):
+async def test_cleanup_artifacts_scoped_by_session_respects_count_policy(
+    tmp_path, sqlite_service_factory
+):
   db_path = tmp_path / 'compactions.db'
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   for observation_id in ('obs-a-1', 'obs-a-2', 'obs-a-3'):
     await service.save_observation(
@@ -946,9 +977,11 @@ async def test_cleanup_artifacts_scoped_by_session_respects_count_policy(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_evict_session_removes_only_target_session_scoped_records(tmp_path):
+async def test_evict_session_removes_only_target_session_scoped_records(
+    tmp_path, sqlite_service_factory
+):
   db_path = tmp_path / 'compactions.db'
-  service = SqliteCompactionService(str(db_path))
+  service = sqlite_service_factory(db_path)
 
   session_a_observation = Observation(
       observation_id='obs-a',

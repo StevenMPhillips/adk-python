@@ -201,11 +201,18 @@ class SqliteCompactionService(BaseCompactionService):
   def __del__(self):
     if self._db_connection is None:
       return
+    db_connection = self._db_connection
+    self._db_connection = None
     try:
-      self._db_connection.stop()
+      db_connection.stop()
     except RuntimeError:
       pass
-    self._db_connection = None
+
+  async def __aenter__(self) -> SqliteCompactionService:
+    return self
+
+  async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+    await self.close()
 
   async def save_tool_run_compaction(
       self, tool_run_compaction: ToolRunCompaction
@@ -612,9 +619,7 @@ class SqliteCompactionService(BaseCompactionService):
     await self._ensure_schema()
     effective_now = time.time() if now is None else now
     cutoff = (
-        effective_now - max_age_seconds
-        if max_age_seconds is not None
-        else None
+        effective_now - max_age_seconds if max_age_seconds is not None else None
     )
 
     deleted_tool_runs = 0
@@ -766,9 +771,7 @@ class SqliteCompactionService(BaseCompactionService):
     if cutoff is None:
       return 0
 
-    query = (
-        f'DELETE FROM {table} WHERE {timestamp_column} <= ?'
-    )
+    query = f'DELETE FROM {table} WHERE {timestamp_column} <= ?'
     params: list[object] = [cutoff]
     if session_id is not None:
       query += ' AND session_id = ?'
@@ -797,7 +800,7 @@ class SqliteCompactionService(BaseCompactionService):
         params = [session_id, max_records]
       return await self._execute_delete_count(
           db,
-          f'''
+          f"""
           WITH ranked AS (
             SELECT
               {id_column} AS delete_id,
@@ -812,7 +815,7 @@ class SqliteCompactionService(BaseCompactionService):
           WHERE {id_column} IN (
             SELECT delete_id FROM ranked WHERE rn > ?
           )
-          ''',
+          """,
           tuple(params),
       )
 
@@ -823,7 +826,7 @@ class SqliteCompactionService(BaseCompactionService):
       params = [session_id, max_records]
     return await self._execute_delete_count(
         db,
-        f'''
+        f"""
         WITH ranked AS (
           SELECT
             {id_column} AS delete_id,
@@ -837,7 +840,7 @@ class SqliteCompactionService(BaseCompactionService):
         WHERE {id_column} IN (
           SELECT delete_id FROM ranked WHERE rn > ?
         )
-        ''',
+        """,
         tuple(params),
     )
 
@@ -874,12 +877,21 @@ class SqliteCompactionService(BaseCompactionService):
 
   async def close(self) -> None:
     """Closes the reusable sqlite connection."""
+    db_connection: aiosqlite.Connection | None = None
     async with self._db_connection_lock:
       if self._db_connection is None:
         return
       async with self._db_operation_lock:
-        await self._db_connection.close()
+        db_connection = self._db_connection
         self._db_connection = None
+
+    if db_connection is None:
+      return
+    try:
+      await db_connection.close()
+    except RuntimeError:
+      # Treat already-stopped aiosqlite worker threads as closed.
+      pass
 
   async def _ensure_schema(self) -> None:
     if self._schema_ready:
