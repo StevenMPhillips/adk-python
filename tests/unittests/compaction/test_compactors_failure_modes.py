@@ -19,10 +19,13 @@ from google.adk.compaction.compactors.pytest_compactor import PytestCompactor
 from google.adk.compaction.compactors.ruff_compactor import RuffCompactor
 from google.adk.events.event import Event
 from google.genai import types
+from typing import Any
 import pytest
 
 
-def _tool_event(*, response: object, event_id: str = 'evt-failure') -> Event:
+def _tool_event(
+    *, response: Any, event_id: str = 'evt-failure'
+) -> Event:
   return Event(
       author='agent',
       content=types.Content(
@@ -197,3 +200,23 @@ def test_pytest_compactor_preserves_failure_signature_under_noisy_output():
   assert noisy.tests_failed == clean.tests_failed
   assert noisy.error_signatures == clean.error_signatures
   assert _file_line_ref_tuples(noisy) == _file_line_ref_tuples(clean)
+
+
+def test_generic_compactor_avoids_timestamp_like_false_positives():
+  payload = {
+      'stdout': '\n'.join([
+          'job started at 12:34',
+          'elapsed 99:10',
+          'src/google/adk/runners.py:101: RuntimeError',
+      ]),
+      'exit_code': 1,
+  }
+
+  compaction = GenericToolRunCompactor().compact(_tool_event(response=payload))
+
+  assert compaction is not None
+  assert ('src/google/adk/runners.py', 101, None) in _file_line_ref_tuples(
+      compaction
+  )
+  assert ('12', 34, None) not in _file_line_ref_tuples(compaction)
+  assert ('99', 10, None) not in _file_line_ref_tuples(compaction)

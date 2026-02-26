@@ -50,7 +50,7 @@ def test_generic_compactor_extracts_file_line_refs_and_trims_stderr_tail():
   }
 
   compactor = GenericToolRunCompactor(stderr_tail_lines=20, token_budget=600)
-  compaction = compactor.compact(_tool_event(response))
+  compaction = compactor.compact(_tool_event(response=response))
 
   assert compaction is not None
   assert compaction.exit_code == 1
@@ -70,16 +70,54 @@ def test_generic_compactor_extracts_file_line_refs_and_trims_stderr_tail():
 
 
 def test_generic_compactor_applies_token_budget_cap_on_trimmed_trace():
-  response = {
+  response: dict[str, object] = {
       'command': 'ruff check src',
       'exitCode': '2',
       'stderr': '\n'.join(['1234567890', 'abcdefghij', 'XYZ']),
   }
 
   compactor = GenericToolRunCompactor(stderr_tail_lines=20, token_budget=5)
-  compaction = compactor.compact(_tool_event(response))
+  compaction = compactor.compact(_tool_event(response=response))
 
   assert compaction is not None
   assert compaction.exit_code == 2
   assert compaction.trimmed_trace == ['abcdefghij', 'XYZ']
   assert compaction.stats.compact_tokens_est <= 5
+
+
+def test_generic_compactor_handles_cross_platform_path_edge_cases():
+  stderr = '\n'.join([
+      r'C:\repo\pkg-dir\module.py:10:2: RuntimeError',
+      r'\\server\share\lib\node.py:22:1: LookupError',
+      '.env:7: bad value',
+      './configs/.pre-commit-config.yaml:3: malformed',
+      'docs/my-file-name:9: missing heading',
+      'elapsed 12:34',
+  ])
+  response: dict[str, object] = {
+      'command': 'python script.py',
+      'exit_code': 1,
+      'stderr': stderr,
+  }
+
+  compaction = GenericToolRunCompactor().compact(_tool_event(response=response))
+
+  assert compaction is not None
+  assert (r'C:\repo\pkg-dir\module.py', 10, 2) in {
+      (ref.path, ref.line, ref.col) for ref in compaction.file_line_refs
+  }
+  assert (r'\\server\share\lib\node.py', 22, 1) in {
+      (ref.path, ref.line, ref.col) for ref in compaction.file_line_refs
+  }
+  assert ('.env', 7, None) in {
+      (ref.path, ref.line, ref.col) for ref in compaction.file_line_refs
+  }
+  assert ('./configs/.pre-commit-config.yaml', 3, None) in {
+      (ref.path, ref.line, ref.col) for ref in compaction.file_line_refs
+  }
+  assert ('docs/my-file-name', 9, None) in {
+      (ref.path, ref.line, ref.col) for ref in compaction.file_line_refs
+  }
+  assert ('12', 34, None) not in {
+      (ref.path, ref.line, ref.col) for ref in compaction.file_line_refs
+  }

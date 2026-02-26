@@ -123,3 +123,30 @@ def test_mypy_compactor_applies_token_budget_to_trimmed_trace():
       0
   ] == ('mypy::misc::src/google/adk/agents/agent.py')
   assert compaction.stats.compact_tokens_est <= 20
+
+
+def test_mypy_compactor_parses_windows_and_colon_paths():
+  stdout = '\n'.join([
+      (
+          r'C:\repo\src\app\service.py:15:4: '
+          r'error: Name "token" is not defined [name-defined]'
+      ),
+      (
+          'namespace:pkg/module.py:21:9: '
+          'error: Incompatible return value type [return-value]'
+      ),
+  ])
+
+  compaction = MypyCompactor().compact(_tool_event(stdout=stdout))
+
+  assert compaction is not None
+  assert compaction.error_signatures == [
+      r'mypy::name-defined::C:\repo\src\app\service.py',
+      'mypy::return-value::namespace:pkg/module.py',
+  ]
+  assert (r'C:\repo\src\app\service.py', 15, 4) in {
+      (ref.path, ref.line, ref.col) for ref in compaction.file_line_refs
+  }
+  assert ('namespace:pkg/module.py', 21, 9) in {
+      (ref.path, ref.line, ref.col) for ref in compaction.file_line_refs
+  }

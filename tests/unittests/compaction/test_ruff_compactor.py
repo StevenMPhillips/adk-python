@@ -115,3 +115,24 @@ def test_ruff_compactor_applies_token_budget_to_trimmed_trace():
       0
   ] == 'ruff::F401::src/google/adk/a.py'
   assert compaction.stats.compact_tokens_est <= 16
+
+
+def test_ruff_compactor_parses_windows_and_colon_paths():
+  stdout = '\n'.join([
+      r'C:\repo\pkg\lint_target.py:8:3: F401 `sys` imported but unused',
+      'namespace:pkg/lint_target.py:11:2: E722 Do not use bare `except`',
+  ])
+
+  compaction = RuffCompactor().compact(_tool_event(stdout=stdout))
+
+  assert compaction is not None
+  assert compaction.error_signatures == [
+      r'ruff::F401::C:\repo\pkg\lint_target.py',
+      'ruff::E722::namespace:pkg/lint_target.py',
+  ]
+  assert (r'C:\repo\pkg\lint_target.py', 8, 3) in {
+      (ref.path, ref.line, ref.col) for ref in compaction.file_line_refs
+  }
+  assert ('namespace:pkg/lint_target.py', 11, 2) in {
+      (ref.path, ref.line, ref.col) for ref in compaction.file_line_refs
+  }

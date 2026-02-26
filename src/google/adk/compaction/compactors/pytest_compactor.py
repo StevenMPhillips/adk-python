@@ -43,7 +43,10 @@ _TRACEBACK_FILE_LINE_PATTERN = re.compile(
     r'^\s*File\s+"(?P<path>[^"]+)",\s+line\s+(?P<line>\d+)'
 )
 _ERROR_TYPE_PATTERN = re.compile(
-    r'(?P<error_type>[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Failed|Exit))'
+    r'^\s*(?P<error_type>'
+    r'[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*'
+    r'(?:Error|Exception|Failed|Exit)'
+    r')(?::|\b)'
 )
 
 
@@ -51,7 +54,7 @@ def _extract_error_type(text: str) -> str | None:
   """Returns an error type name when one is present."""
   if not text:
     return None
-  match = _ERROR_TYPE_PATTERN.search(text)
+  match = _ERROR_TYPE_PATTERN.match(text)
   if match is None:
     return None
   return match.group('error_type')

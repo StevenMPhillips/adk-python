@@ -139,3 +139,25 @@ def test_pytest_compactor_extracts_multi_failure_traceback_artifacts():
       for line in compaction.trimmed_trace
   )
   assert compaction.stats.compression_ratio > 10.0
+
+
+def test_pytest_compactor_keeps_error_type_extraction_conservative():
+  stdout = '\n'.join([
+      'Traceback (most recent call last):',
+      r'  File "C:\repo\tests\test_auth.py", line 9, in test_login',
+      '    assert auth("alice")',
+      'E   did not raise ValueError in helper path',
+      'FAILED tests/test_auth.py::test_login - did not raise ValueError',
+  ])
+
+  compaction = PytestCompactor().compact(_tool_event(stdout=stdout))
+
+  assert compaction is not None
+  assert compaction.tests_failed == ['tests/test_auth.py::test_login']
+  assert compaction.error_signatures == [
+      'pytest::UnknownError::tests/test_auth.py::test_login'
+  ]
+  assert any(
+      ref.path == r'C:\repo\tests\test_auth.py' and ref.line == 9
+      for ref in compaction.file_line_refs
+  )

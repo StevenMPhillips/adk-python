@@ -30,9 +30,21 @@ _DEFAULT_STDERR_TAIL_LINES = 20
 _DEFAULT_TOKEN_BUDGET = 600
 _CHARS_PER_TOKEN = 4
 
+_PATH_SEGMENT = r'[A-Za-z0-9._@+-]+'
+_RELATIVE_OR_UNIX_PATH = (
+    rf'(?:{_PATH_SEGMENT}(?:[\\/]{_PATH_SEGMENT})*|'
+    rf'(?:\.|\.\.|~)(?:[\\/]{_PATH_SEGMENT})+|'
+    rf'[\\/]{_PATH_SEGMENT}(?:[\\/]{_PATH_SEGMENT})*)'
+)
+_WINDOWS_DRIVE_PATH = rf'[A-Za-z]:(?:[\\/]{_PATH_SEGMENT})+'
+_WINDOWS_UNC_PATH = rf'\\\\{_PATH_SEGMENT}(?:\\{_PATH_SEGMENT})+'
 _FILE_LINE_PATTERN = re.compile(
-    r'(?P<path>[A-Za-z0-9_./\\-]+\.[A-Za-z0-9_]+)'
+    rf'(?<![A-Za-z0-9_.])'
+    r'(?=[^:\n]*[A-Za-z_./\\~@-])'
+    rf'(?P<path>(?:{_WINDOWS_DRIVE_PATH}|{_WINDOWS_UNC_PATH}|'
+    rf'{_RELATIVE_OR_UNIX_PATH}))'
     r':(?P<line>\d+)(?::(?P<col>\d+))?'
+    r'(?=$|[^0-9])'
 )
 
 

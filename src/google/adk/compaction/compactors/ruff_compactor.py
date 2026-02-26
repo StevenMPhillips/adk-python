@@ -36,7 +36,7 @@ from .helpers import _enforce_token_budget
 
 _DEFAULT_TOKEN_BUDGET = 400
 _RUFF_ERROR_PATTERN = re.compile(
-    r'^(?P<path>.+?):(?P<line>\d+):(?P<col>\d+):\s+'
+    r'^(?P<path>.+):(?P<line>\d+):(?P<col>\d+):\s+'
     r'(?P<code>[A-Z]+\d+)\s+(?P<message>.+)$'
 )
 
