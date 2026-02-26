@@ -14,8 +14,10 @@
 
 from google.adk.compaction.compactors.base import BaseToolRunCompactor
 from google.adk.compaction.compactors.generic import GenericToolRunCompactor
+from google.adk.compaction.compactors.mypy_compactor import MypyCompactor
 from google.adk.compaction.compactors.pytest_compactor import PytestCompactor
 from google.adk.compaction.compactors.registry import ToolRunCompactorRegistry
+from google.adk.compaction.compactors.ruff_compactor import RuffCompactor
 from google.adk.compaction.models import ToolRunCompaction
 from google.adk.events.event import Event
 import pytest
@@ -51,7 +53,21 @@ def test_registry_uses_pytest_compactor_for_pytest_commands_by_default():
   registry = ToolRunCompactorRegistry()
 
   assert isinstance(registry.get_compactor('python -m pytest -q'),
-                    PytestCompactor)
+                     PytestCompactor)
+
+
+def test_registry_uses_mypy_compactor_for_mypy_commands_by_default():
+  registry = ToolRunCompactorRegistry()
+
+  assert isinstance(registry.get_compactor('mypy src/google/adk'),
+                    MypyCompactor)
+
+
+def test_registry_uses_ruff_compactor_for_ruff_and_flake8_by_default():
+  registry = ToolRunCompactorRegistry()
+
+  assert isinstance(registry.get_compactor('ruff check src'), RuffCompactor)
+  assert isinstance(registry.get_compactor('flake8 src'), RuffCompactor)
 
 
 def test_registry_rejects_empty_matcher():

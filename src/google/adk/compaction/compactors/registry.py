@@ -16,7 +16,9 @@ from __future__ import annotations
 
 from .base import BaseToolRunCompactor
 from .generic import GenericToolRunCompactor
+from .mypy_compactor import MypyCompactor
 from .pytest_compactor import PytestCompactor
+from .ruff_compactor import RuffCompactor
 
 
 class ToolRunCompactorRegistry:
@@ -24,8 +26,12 @@ class ToolRunCompactorRegistry:
 
   def __init__(self, fallback: BaseToolRunCompactor | None = None):
     self._fallback = fallback or GenericToolRunCompactor()
+    ruff_compactor = RuffCompactor()
     self._registrations: list[tuple[str, BaseToolRunCompactor]] = [
-        ('pytest', PytestCompactor())
+        ('pytest', PytestCompactor()),
+        ('mypy', MypyCompactor()),
+        ('ruff', ruff_compactor),
+        ('flake8', ruff_compactor),
     ]
 
   def register(self, command_match: str, compactor: BaseToolRunCompactor) -> None:
