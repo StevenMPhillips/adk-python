@@ -27,6 +27,12 @@ from .models import Provenance
 from .models import Reflection
 from .models import TaskStateAnchor
 from .models import ToolRunCompaction
+from .rehydration import EvidencePack
+from .rehydration import RawExcerpt
+from .rehydration import RehydrationExecutor
+from .rehydration import RehydrationPlanner
+from .rehydration import RetrievalQuery
+from .rehydration import TimeRange
 
 __all__ = [
     'CompactionStats',
@@ -42,4 +48,10 @@ __all__ = [
     'Reflection',
     'TaskStateAnchor',
     'ToolRunCompaction',
+    'EvidencePack',
+    'RawExcerpt',
+    'RehydrationExecutor',
+    'RehydrationPlanner',
+    'RetrievalQuery',
+    'TimeRange',
 ]
