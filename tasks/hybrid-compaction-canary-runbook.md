@@ -144,6 +144,45 @@ Track these signals continuously during canary windows.
   - Page immediately for Sev2+ user impact or burn-rate alert.
   - Open incident and freeze progression for any stop criterion breach.
 
+### Practical degradation signal checklist
+
+Use this checklist during Stage 0-2 rollouts to confirm degraded-mode signaling
+is present and bounded.
+
+- [ ] **Deterministic tool-run compaction degradation signals:**
+      `Deterministic tool-run compaction failed for session_id=<...>, invocation_id=<...>, event_id=<...>.`
+      - Condition to monitor: repeated exceptions for the same `session_id` or
+        bursts across unique `session_id` values.
+      - Trigger: >=3 occurrences in 5 minutes for one session, or >=20
+        occurrences in 10 minutes fleet-wide.
+- [ ] **Deterministic patch compaction degradation signals:**
+      `Deterministic patch compaction failed for session_id=<...>, invocation_id=<...>, event_id=<...>.`
+      - Condition to monitor: patch-compaction failures tracking with latency or
+        timeout increases.
+      - Trigger: >=10 occurrences in 10 minutes with any concurrent p95 latency
+        regression >10%.
+- [ ] **Hybrid assembly fallback signals:**
+      `Hybrid prompt assembly failed for session_id=<...>, invocation_id=<...>.`
+      - Condition to monitor: fallback frequency and whether affected sessions
+        continue to produce successful model responses.
+      - Trigger: >=5% of hybrid-enabled invocations over a 15-minute window, or
+        any sustained increase over baseline for 30 minutes.
+- [ ] **Observational runtime initialization degradation signals (warning):**
+      `Skipping observational memory runtime initialization because root agent does not expose canonical_model. app_name=<...>`
+      - Condition to monitor: unexpected warnings after enabling
+        `enable_observational_memory`.
+      - Trigger: warning appears in production canary where the root agent is
+        expected to expose `canonical_model`.
+
+Operator notes:
+
+- Treat any one-off signal as degraded-but-tolerated behavior; do not page if
+  service-level metrics remain green.
+- Treat repeated signals with shared `session_id`/`invocation_id` as a likely
+  sticky failure mode that needs mitigation before stage promotion.
+- Include `session_id`, `invocation_id`, and `event_id` in incident artifacts
+  for targeted replay and root-cause analysis.
+
 ### Repo-relevant diagnostic command examples
 
 ```bash

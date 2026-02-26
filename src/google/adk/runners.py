@@ -929,7 +929,12 @@ class Runner:
         invocation_context.invocation_id,
     )
 
-  async def _run_deterministic_compaction_for_event(self, event: Event) -> None:
+  async def _run_deterministic_compaction_for_event(
+      self,
+      event: Event,
+      *,
+      session_id: str,
+  ) -> None:
     """Runs deterministic compaction hooks for tool response events."""
     if not event.get_function_responses():
       return
@@ -950,7 +955,10 @@ class Runner:
         )
     except Exception:
       logger.exception(
-          'Deterministic tool-run compaction failed for event_id=%s.',
+          'Deterministic tool-run compaction failed for session_id=%s, '
+          'invocation_id=%s, event_id=%s.',
+          session_id,
+          event.invocation_id,
           event.id,
       )
 
@@ -960,7 +968,10 @@ class Runner:
         await config.compaction_service.save_patch_compaction(patch_compaction)
     except Exception:
       logger.exception(
-          'Deterministic patch compaction failed for event_id=%s.',
+          'Deterministic patch compaction failed for session_id=%s, '
+          'invocation_id=%s, event_id=%s.',
+          session_id,
+          event.invocation_id,
           event.id,
       )
 
@@ -969,7 +980,10 @@ class Runner:
   ) -> None:
     """Appends an event and runs deterministic compaction inline."""
     await self.session_service.append_event(session=session, event=event)
-    await self._run_deterministic_compaction_for_event(event)
+    await self._run_deterministic_compaction_for_event(
+        event,
+        session_id=session.id,
+    )
 
   async def _exec_with_plugin(
       self,

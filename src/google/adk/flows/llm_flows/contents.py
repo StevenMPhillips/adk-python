@@ -96,8 +96,10 @@ class _ContentLlmRequestProcessor(BaseLlmRequestProcessor):
           )
         except Exception:
           logger.exception(
-              'Hybrid prompt assembly failed for session_id=%s.',
+              'Hybrid prompt assembly failed for session_id=%s, '
+              'invocation_id=%s.',
               invocation_context.session.id,
+              invocation_context.invocation_id,
           )
           llm_request.contents = default_contents
     else:

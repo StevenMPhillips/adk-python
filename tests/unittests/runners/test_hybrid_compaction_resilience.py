@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from google.adk.agents.llm_agent import LlmAgent
 from google.adk.agents.run_config import RunConfig
 from google.adk.apps.app import App
@@ -140,6 +142,64 @@ async def test_hybrid_deterministic_save_failure_degrades_but_continues():
 
 
 @pytest.mark.asyncio
+async def test_hybrid_deterministic_save_failure_emits_degradation_signal(
+    caplog,
+):
+  tool = FunctionTool(func=_run_shell)
+  model = testing_utils.MockModel.create([
+      testing_utils.LlmResponse(
+          content=testing_utils.ModelContent(
+              parts=[
+                  Part(
+                      function_call=FunctionCall(
+                          name=tool.name,
+                          args={'command': 'pytest tests/unittests'},
+                      )
+                  )
+              ]
+          )
+      ),
+      testing_utils.LlmResponse(
+          content=testing_utils.ModelContent(parts=[Part(text='done')])
+      ),
+  ])
+  compaction_service = _FailingCompactionService(fail_save_tool_run=True)
+  app = App(
+      name='hybrid_resilience_logging_app',
+      root_agent=LlmAgent(name='agent', model=model, tools=[tool]),
+      events_compaction_config=HybridEventsCompactionConfig(
+          compaction_service=compaction_service,
+          tool_run_compactor_registry=ToolRunCompactorRegistry(),
+          patch_compactor=PatchCompactor(),
+          compaction_interval=999,
+          overlap_size=0,
+      ),
+  )
+  runner = testing_utils.InMemoryRunner(app=app)
+
+  with caplog.at_level(logging.ERROR, logger='google_adk'):
+    events = await runner.run_async('run the shell tool')
+
+  assert 'done' in _event_texts(events)
+  degradation_records = [
+      record
+      for record in caplog.records
+      if (
+          record.levelno == logging.ERROR
+          and 'Deterministic tool-run compaction failed for session_id='
+          in record.getMessage()
+      )
+  ]
+  assert degradation_records
+  assert all(
+      'invocation_id=' in record.getMessage() for record in degradation_records
+  )
+  assert all(
+      'event_id=' in record.getMessage() for record in degradation_records
+  )
+
+
+@pytest.mark.asyncio
 async def test_hybrid_prompt_assembly_query_failure_degrades_but_continues():
   model = testing_utils.MockModel.create(['hybrid fallback response'])
   compaction_service = _FailingCompactionService(fail_get_task_state=True)
@@ -161,6 +221,45 @@ async def test_hybrid_prompt_assembly_query_failure_degrades_but_continues():
 
   assert compaction_service.get_task_state_calls >= 1
   assert 'hybrid fallback response' in _event_texts(events)
+
+
+@pytest.mark.asyncio
+async def test_hybrid_prompt_assembly_query_failure_emits_degradation_signal(
+    caplog,
+):
+  model = testing_utils.MockModel.create(['hybrid fallback response'])
+  compaction_service = _FailingCompactionService(fail_get_task_state=True)
+  app = App(
+      name='hybrid_prompt_resilience_logging_app',
+      root_agent=LlmAgent(name='agent', model=model),
+      events_compaction_config=HybridEventsCompactionConfig(
+          compaction_service=compaction_service,
+          tool_run_compactor_registry=ToolRunCompactorRegistry(),
+          patch_compactor=PatchCompactor(),
+          compaction_interval=999,
+          overlap_size=0,
+          enable_hybrid_prompt_assembly=True,
+      ),
+  )
+  runner = testing_utils.InMemoryRunner(app=app)
+
+  with caplog.at_level(logging.ERROR, logger='google_adk'):
+    events = await runner.run_async('hello hybrid prompt assembly')
+
+  assert 'hybrid fallback response' in _event_texts(events)
+  degradation_records = [
+      record
+      for record in caplog.records
+      if (
+          record.levelno == logging.ERROR
+          and 'Hybrid prompt assembly failed for session_id='
+          in record.getMessage()
+      )
+  ]
+  assert degradation_records
+  assert all(
+      'invocation_id=' in record.getMessage() for record in degradation_records
+  )
 
 
 @pytest.mark.asyncio
