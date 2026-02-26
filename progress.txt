@@ -111,3 +111,11 @@
 - Duration: N/A
 - Status: complete
 ---
+
+## 2026-02-25 23:21 PST - Story US-015: End-to-end integration test
+- Sub-agent: ses_367319088ffecTCzW76nqPhgV0
+- Commit: d916bed0 (by: sub-agent)
+- Files changed: tests/unittests/runners/test_hybrid_compaction.py
+- Duration: N/A
+- Status: complete
+---

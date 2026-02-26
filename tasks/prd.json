@@ -291,8 +291,9 @@
         "Typecheck/lint passes"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "status": "complete",
+      "notes": "Implemented in commit d916bed0"
     }
   ]
 }
