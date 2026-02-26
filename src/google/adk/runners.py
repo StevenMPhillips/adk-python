@@ -51,6 +51,7 @@ from .events.event import EventActions
 from .flows.llm_flows import contents
 from .flows.llm_flows.functions import find_event_by_function_call_id
 from .flows.llm_flows.functions import find_matching_function_call
+from .compaction.config import HybridEventsCompactionConfig
 from .memory.base_memory_service import BaseMemoryService
 from .memory.in_memory_memory_service import InMemoryMemoryService
 from .platform.thread import create_thread
@@ -107,6 +108,29 @@ def _apply_run_config_custom_metadata(
       **run_config.custom_metadata,
       **(event.custom_metadata or {}),
   }
+
+
+def _extract_tool_command_from_event(event: Event) -> str:
+  """Extracts command text from a tool-response event."""
+  function_responses = event.get_function_responses()
+  if not function_responses:
+    return ''
+
+  function_response = function_responses[0]
+  payload = function_response.response
+  if isinstance(payload, dict):
+    for key in ('command', 'cmd'):
+      command = payload.get(key)
+      if isinstance(command, str) and command.strip():
+        return command.strip()
+
+    tool_input = payload.get('tool_input')
+    if isinstance(tool_input, dict):
+      command = tool_input.get('command')
+      if isinstance(command, str) and command.strip():
+        return command.strip()
+
+  return function_response.name or ''
 
 
 class Runner:
@@ -775,6 +799,48 @@ class Runner:
       return False
     return True
 
+  def _get_hybrid_events_compaction_config(
+      self,
+  ) -> HybridEventsCompactionConfig | None:
+    """Returns enabled hybrid compaction config, if configured."""
+    if not self.app or not self.app.events_compaction_config:
+      return None
+
+    config = self.app.events_compaction_config
+    if not isinstance(config, HybridEventsCompactionConfig):
+      return None
+    if not config.enable_deterministic_compaction:
+      return None
+    return config
+
+  async def _run_deterministic_compaction_for_event(self, event: Event) -> None:
+    """Runs deterministic compaction hooks for tool response events."""
+    if not event.get_function_responses():
+      return
+
+    config = self._get_hybrid_events_compaction_config()
+    if config is None:
+      return
+
+    command = _extract_tool_command_from_event(event)
+    tool_run_compactor = config.tool_run_compactor_registry.get_compactor(command)
+    tool_run_compaction = tool_run_compactor.compact(event)
+    if tool_run_compaction is not None:
+      await config.compaction_service.save_tool_run_compaction(
+          tool_run_compaction
+      )
+
+    patch_compaction = config.patch_compactor.compact(event)
+    if patch_compaction is not None:
+      await config.compaction_service.save_patch_compaction(patch_compaction)
+
+  async def _append_event_with_compaction(
+      self, *, session: Session, event: Event
+  ) -> None:
+    """Appends an event and runs deterministic compaction inline."""
+    await self.session_service.append_event(session=session, event=event)
+    await self._run_deterministic_compaction_for_event(event)
+
   async def _exec_with_plugin(
       self,
       invocation_context: InvocationContext,
@@ -810,7 +876,7 @@ class Runner:
           early_exit_event, invocation_context.run_config
       )
       if self._should_append_event(early_exit_event, is_live_call):
-        await self.session_service.append_event(
+        await self._append_event_with_compaction(
             session=session,
             event=early_exit_event,
         )
@@ -864,13 +930,13 @@ class Runner:
                     'Appending transcription finished event: %s', event
                 )
                 if self._should_append_event(event, is_live_call):
-                  await self.session_service.append_event(
+                  await self._append_event_with_compaction(
                       session=session, event=event
                   )
 
                 for buffered_event in buffered_events:
                   logger.debug('Appending buffered event: %s', buffered_event)
-                  await self.session_service.append_event(
+                  await self._append_event_with_compaction(
                       session=session, event=buffered_event
                   )
                   yield buffered_event  # yield buffered events to caller
@@ -880,12 +946,12 @@ class Runner:
                 # example, event that stores blob reference, should be appended.
                 if self._should_append_event(event, is_live_call):
                   logger.debug('Appending non-buffered event: %s', event)
-                  await self.session_service.append_event(
+                  await self._append_event_with_compaction(
                       session=session, event=event
                   )
           else:
             if event.partial is not True:
-              await self.session_service.append_event(
+              await self._append_event_with_compaction(
                   session=session, event=event
               )
 

@@ -15,6 +15,7 @@
 """Models for deterministic artifact compaction outputs."""
 
 from .models import CompactionStats
+from .config import HybridEventsCompactionConfig
 from .models import Decision
 from .models import EvidenceRef
 from .models import EvidencedItem
@@ -29,6 +30,7 @@ from .models import ToolRunCompaction
 
 __all__ = [
     'CompactionStats',
+    'HybridEventsCompactionConfig',
     'Decision',
     'EvidenceRef',
     'EvidencedItem',
