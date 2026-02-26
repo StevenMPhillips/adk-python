@@ -58,11 +58,32 @@ uv sync --extra test
 ```
 
 ```bash
-for i in $(seq 1 30); do
-  ./.venv/bin/pytest \
-    tests/unittests/runners/test_hybrid_compaction.py::test_hybrid_compaction_end_to_end_observational_integration -q || break
-done
+./scripts/run_hybrid_canary_soak.sh --iterations 30 --stop-on-failure
 ```
+
+### Canary soak automation script
+
+Use `scripts/run_hybrid_canary_soak.sh` for reproducible local and CI rehearsals.
+
+- **Default test target:**
+  `tests/unittests/runners/test_hybrid_compaction.py::test_hybrid_compaction_end_to_end_observational_integration`
+- **Default loop count:** `30` runs.
+- **Summary output:**
+  `CANARY_SOAK_SUMMARY run_count=<n> pass_count=<n> fail_count=<n>`
+- **Exit code behavior:**
+  - `0` when all executed runs pass.
+  - `1` when any run fails.
+
+Example CI/local command:
+
+```bash
+./scripts/run_hybrid_canary_soak.sh --iterations 30 --stop-on-failure
+```
+
+Recommended promotion threshold:
+
+- **PASS:** `run_count=30`, `pass_count=30`, `fail_count=0`
+- **FAIL:** any non-zero `fail_count` or fewer than 30 successful runs.
 
 ## Canary progression
 
