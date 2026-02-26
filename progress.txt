@@ -31,3 +31,11 @@
 - Duration: N/A
 - Status: complete
 ---
+
+## 2026-02-25 22:35 PST - Story US-005: Implement MypyCompactor and RuffCompactor
+- Sub-agent: ses_3675b0bcfffec7dmfaws9YmPel
+- Commit: d3a3dd2b (by: sub-agent)
+- Files changed: src/google/adk/compaction/compactors/__init__.py, src/google/adk/compaction/compactors/mypy_compactor.py, src/google/adk/compaction/compactors/registry.py, src/google/adk/compaction/compactors/ruff_compactor.py, tests/unittests/compaction/test_mypy_compactor.py, tests/unittests/compaction/test_ruff_compactor.py, tests/unittests/compaction/test_tool_run_compactor_registry.py
+- Duration: N/A
+- Status: complete
+---
