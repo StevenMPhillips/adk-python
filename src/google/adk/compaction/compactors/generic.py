@@ -14,16 +14,16 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
 from ...events.event import Event
-from ..models import CompactionStats
 from ..models import FileLineRef
 from ..models import Provenance
 from ..models import ToolRunCompaction
 from .base import BaseToolRunCompactor
+from .helpers import _build_compaction_stats
+from .helpers import _build_raw_text
 
 _DEFAULT_STDERR_TAIL_LINES = 20
 _DEFAULT_TOKEN_BUDGET = 600
@@ -183,19 +183,17 @@ class GenericToolRunCompactor(BaseToolRunCompactor):
     key_errors = [line for line in trimmed_trace if line.strip()][:3]
 
     compact_text = '\n'.join(trimmed_trace)
-    raw_text = '\n'.join([
-        command,
-        stdout_text,
-        stderr_text,
-        json.dumps(payload, sort_keys=True),
-    ])
-    raw_tokens_est = _estimate_token_count(raw_text)
-    compact_tokens_est = _estimate_token_count(compact_text)
-
-    if compact_tokens_est <= 0:
-      compression_ratio = float(raw_tokens_est) if raw_tokens_est else 1.0
-    else:
-      compression_ratio = raw_tokens_est / compact_tokens_est
+    raw_text = _build_raw_text(
+        command=command,
+        stdout_text=stdout_text,
+        stderr_text=stderr_text,
+        payload=payload,
+    )
+    stats = _build_compaction_stats(
+        raw_text=raw_text,
+        compact_text=compact_text,
+        estimate_token_count=_estimate_token_count,
+    )
 
     return ToolRunCompaction(
         event_id=event.id,
@@ -209,10 +207,6 @@ class GenericToolRunCompactor(BaseToolRunCompactor):
         file_line_refs=refs,
         trimmed_trace=trimmed_trace,
         salient_snippets=[],
-        stats=CompactionStats(
-            raw_tokens_est=raw_tokens_est,
-            compact_tokens_est=compact_tokens_est,
-            compression_ratio=compression_ratio,
-        ),
+        stats=stats,
         provenance=Provenance(event_id=event.id),
     )

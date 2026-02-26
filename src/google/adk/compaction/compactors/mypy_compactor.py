@@ -14,11 +14,9 @@
 
 from __future__ import annotations
 
-import json
 import re
 
 from ...events.event import Event
-from ..models import CompactionStats
 from ..models import FileLineRef
 from ..models import Provenance
 from ..models import ToolRunCompaction
@@ -30,79 +28,17 @@ from .generic import _extract_exit_code
 from .generic import _extract_response_payload
 from .generic import _safe_to_int
 from .generic import _safe_to_text
+from .helpers import _build_compact_text_for_stats
+from .helpers import _build_compaction_stats
+from .helpers import _build_raw_text
+from .helpers import _dedupe_preserving_order
+from .helpers import _enforce_token_budget
 
 _DEFAULT_TOKEN_BUDGET = 400
 _MYPY_ERROR_PATTERN = re.compile(
     r'^(?P<path>.+?):(?P<line>\d+):(?P<col>\d+):\s+'
     r'error:\s+(?P<message>.+?)\s+\[(?P<code>[^\]]+)\]\s*$'
 )
-
-
-def _dedupe_preserving_order(items: list[str]) -> list[str]:
-  """Deduplicates string items while preserving first-seen order."""
-  deduped: list[str] = []
-  seen: set[str] = set()
-  for item in items:
-    if item in seen:
-      continue
-    seen.add(item)
-    deduped.append(item)
-  return deduped
-
-
-def _compact_text_for_stats(
-    error_signatures: list[str],
-    key_errors: list[str],
-    trimmed_trace: list[str],
-    salient_snippets: list[str],
-) -> str:
-  """Builds compact text payload used for token estimates."""
-  return '\n'.join([
-      '\n'.join(error_signatures),
-      '\n'.join(key_errors),
-      '\n'.join(trimmed_trace),
-      '\n'.join(salient_snippets),
-  ])
-
-
-def _enforce_token_budget(
-    *,
-    error_signatures: list[str],
-    key_errors: list[str],
-    trimmed_trace: list[str],
-    salient_snippets: list[str],
-    token_budget: int,
-) -> tuple[list[str], list[str], list[str], list[str]]:
-  """Trims compacted sections until token estimate fits budget."""
-  if token_budget <= 0:
-    return [], [], [], []
-
-  signatures = list(error_signatures)
-  errors = list(key_errors)
-  trace = list(trimmed_trace)
-  snippets = list(salient_snippets)
-
-  while (
-      _estimate_token_count(
-          _compact_text_for_stats(signatures, errors, trace, snippets)
-      )
-      > token_budget
-  ):
-    if snippets:
-      snippets.pop()
-      continue
-    if trace:
-      trace.pop()
-      continue
-    if errors:
-      errors.pop()
-      continue
-    if signatures:
-      signatures.pop()
-      continue
-    break
-
-  return signatures, errors, trace, snippets
 
 
 class MypyCompactor(BaseToolRunCompactor):
@@ -166,27 +102,27 @@ class MypyCompactor(BaseToolRunCompactor):
             trimmed_trace=trimmed_trace,
             salient_snippets=salient_snippets,
             token_budget=self._token_budget,
+            estimate_token_count=_estimate_token_count,
         )
     )
 
-    compact_text = _compact_text_for_stats(
-        error_signatures,
-        key_errors,
-        trimmed_trace,
-        salient_snippets,
+    compact_text = _build_compact_text_for_stats(
+        error_signatures=error_signatures,
+        key_errors=key_errors,
+        trimmed_trace=trimmed_trace,
+        salient_snippets=salient_snippets,
     )
-    raw_text = '\n'.join([
-        command,
-        stdout_text,
-        stderr_text,
-        json.dumps(payload, sort_keys=True),
-    ])
-    raw_tokens_est = _estimate_token_count(raw_text)
-    compact_tokens_est = _estimate_token_count(compact_text)
-    if compact_tokens_est <= 0:
-      compression_ratio = float(raw_tokens_est) if raw_tokens_est else 1.0
-    else:
-      compression_ratio = raw_tokens_est / compact_tokens_est
+    raw_text = _build_raw_text(
+        command=command,
+        stdout_text=stdout_text,
+        stderr_text=stderr_text,
+        payload=payload,
+    )
+    stats = _build_compaction_stats(
+        raw_text=raw_text,
+        compact_text=compact_text,
+        estimate_token_count=_estimate_token_count,
+    )
 
     return ToolRunCompaction(
         event_id=event.id,
@@ -200,10 +136,6 @@ class MypyCompactor(BaseToolRunCompactor):
         file_line_refs=file_line_refs,
         trimmed_trace=trimmed_trace,
         salient_snippets=salient_snippets,
-        stats=CompactionStats(
-            raw_tokens_est=raw_tokens_est,
-            compact_tokens_est=compact_tokens_est,
-            compression_ratio=compression_ratio,
-        ),
+        stats=stats,
         provenance=Provenance(event_id=event.id),
     )

@@ -14,11 +14,9 @@
 
 from __future__ import annotations
 
-import json
 import re
 
 from ...events.event import Event
-from ..models import CompactionStats
 from ..models import FileLineRef
 from ..models import Provenance
 from ..models import ToolRunCompaction
@@ -31,6 +29,10 @@ from .generic import _extract_file_line_refs
 from .generic import _extract_response_payload
 from .generic import _safe_to_int
 from .generic import _safe_to_text
+from .helpers import _build_compact_text_for_stats
+from .helpers import _build_compaction_stats
+from .helpers import _build_raw_text
+from .helpers import _dedupe_preserving_order
 
 _DEFAULT_TOKEN_BUDGET = 600
 _DEFAULT_ERROR_TYPE = 'UnknownError'
@@ -61,18 +63,6 @@ def _split_test_id(test_id: str) -> tuple[str, str]:
     return test_id, test_id
   test_path, test_name = test_id.split('::', 1)
   return test_path, test_name
-
-
-def _dedupe_preserving_order(items: list[str]) -> list[str]:
-  """Deduplicates string items while preserving first-seen order."""
-  deduped: list[str] = []
-  seen: set[str] = set()
-  for item in items:
-    if item in seen:
-      continue
-    seen.add(item)
-    deduped.append(item)
-  return deduped
 
 
 def _extract_traceback_file_line_refs(lines: list[str]) -> list[FileLineRef]:
@@ -187,24 +177,23 @@ class PytestCompactor(BaseToolRunCompactor):
         token_budget=max(1, self._token_budget // 4),
     )
 
-    compact_text = '\n'.join([
-        '\n'.join(error_signatures),
-        '\n'.join(key_errors),
-        '\n'.join(trimmed_trace),
-        '\n'.join(salient_snippets),
-    ])
-    raw_text = '\n'.join([
-        command,
-        stdout_text,
-        stderr_text,
-        json.dumps(payload, sort_keys=True),
-    ])
-    raw_tokens_est = _estimate_token_count(raw_text)
-    compact_tokens_est = _estimate_token_count(compact_text)
-    if compact_tokens_est <= 0:
-      compression_ratio = float(raw_tokens_est) if raw_tokens_est else 1.0
-    else:
-      compression_ratio = raw_tokens_est / compact_tokens_est
+    compact_text = _build_compact_text_for_stats(
+        error_signatures=error_signatures,
+        key_errors=key_errors,
+        trimmed_trace=trimmed_trace,
+        salient_snippets=salient_snippets,
+    )
+    raw_text = _build_raw_text(
+        command=command,
+        stdout_text=stdout_text,
+        stderr_text=stderr_text,
+        payload=payload,
+    )
+    stats = _build_compaction_stats(
+        raw_text=raw_text,
+        compact_text=compact_text,
+        estimate_token_count=_estimate_token_count,
+    )
 
     return ToolRunCompaction(
         event_id=event.id,
@@ -218,10 +207,6 @@ class PytestCompactor(BaseToolRunCompactor):
         file_line_refs=file_line_refs,
         trimmed_trace=trimmed_trace,
         salient_snippets=salient_snippets,
-        stats=CompactionStats(
-            raw_tokens_est=raw_tokens_est,
-            compact_tokens_est=compact_tokens_est,
-            compression_ratio=compression_ratio,
-        ),
+        stats=stats,
         provenance=Provenance(event_id=event.id),
     )
