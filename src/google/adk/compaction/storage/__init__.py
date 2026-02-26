@@ -16,8 +16,10 @@
 
 from .base_compaction_service import BaseCompactionService
 from .in_memory_compaction_service import InMemoryCompactionService
+from .sqlite_compaction_service import SqliteCompactionService
 
 __all__ = [
     'BaseCompactionService',
     'InMemoryCompactionService',
+    'SqliteCompactionService',
 ]
