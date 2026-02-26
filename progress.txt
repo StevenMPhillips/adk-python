@@ -103,3 +103,11 @@
 - Duration: N/A
 - Status: complete
 ---
+
+## 2026-02-25 23:16 PST - Story US-014: Add SQLite-based compaction service
+- Sub-agent: ses_367355d69ffes0BD2sAHTx0rru
+- Commit: 2319f6a9 (by: sub-agent)
+- Files changed: src/google/adk/compaction/storage/__init__.py, src/google/adk/compaction/storage/sqlite_compaction_service.py, tests/unittests/compaction/storage/test_sqlite_compaction_service.py
+- Duration: N/A
+- Status: complete
+---
