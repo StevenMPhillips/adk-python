@@ -55,6 +55,31 @@ def test_registry_uses_pytest_compactor_for_pytest_commands_by_default():
   assert isinstance(
       registry.get_compactor('python -m pytest -q'), PytestCompactor
   )
+  assert isinstance(registry.get_compactor('/usr/bin/pytest -q'),
+                    PytestCompactor)
+
+
+@pytest.mark.parametrize(
+    'command',
+    [
+        'pytest_helper --help',
+        'python -m pytest_helper',
+        'my_pytest_wrapper run',
+    ],
+)
+def test_registry_does_not_match_pytest_substrings_inside_other_tokens(command):
+  registry = ToolRunCompactorRegistry()
+
+  assert isinstance(registry.get_compactor(command), GenericToolRunCompactor)
+
+
+def test_registry_supports_multi_token_custom_matchers():
+  custom_compactor = _StubCompactor()
+  registry = ToolRunCompactorRegistry()
+
+  registry.register('python -m pytest', custom_compactor)
+
+  assert registry.get_compactor('python -m pytest -q tests') is custom_compactor
 
 
 def test_registry_uses_mypy_compactor_for_mypy_commands_by_default():

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from pydantic import Field
+from pydantic import model_validator
 
 from ..apps.app import EventsCompactionConfig
 from .compactors.patch_compactor import PatchCompactor
@@ -45,17 +46,59 @@ class HybridEventsCompactionConfig(EventsCompactionConfig):
   enable_hybrid_prompt_assembly: bool = False
   """Whether hybrid prompt assembly replaces default content assembly."""
 
-  hybrid_prompt_token_budget: int = 8_000
+  hybrid_prompt_token_budget: int = Field(default=8_000, gt=0)
   """Total token budget for hybrid prompt assembly layers."""
 
-  hybrid_raw_turns_count: int = 6
+  hybrid_raw_turns_count: int = Field(default=6, ge=0)
   """Maximum number of latest raw turns to include in the prompt tail."""
 
-  hybrid_compactions_count: int = 6
+  hybrid_compactions_count: int = Field(default=6, ge=0)
   """Maximum number of latest compaction artifacts to include."""
 
-  hybrid_observations_count: int = 3
+  hybrid_observations_count: int = Field(default=3, ge=0)
   """Maximum number of latest observations to include (1-3 recommended)."""
 
-  rehydration_evidence_token_budget: int = 2_000
+  rehydration_evidence_token_budget: int = Field(default=2_000, ge=0)
   """Token budget for optional evidence-pack rehydration payload."""
+
+  @model_validator(mode='after')
+  def _validate_hybrid_compaction_settings(self) -> HybridEventsCompactionConfig:
+    if (
+        self.enable_hybrid_prompt_assembly
+        and not self.enable_deterministic_compaction
+    ):
+      raise ValueError(
+          'enable_hybrid_prompt_assembly requires '
+          'enable_deterministic_compaction.'
+      )
+
+    if (
+        not self.enable_deterministic_compaction
+        and self.hybrid_compactions_count > 0
+    ):
+      raise ValueError(
+          'hybrid_compactions_count must be 0 when '
+          'enable_deterministic_compaction is False.'
+      )
+
+    if self.enable_hybrid_prompt_assembly and (
+        self.hybrid_raw_turns_count
+        + self.hybrid_compactions_count
+        + self.hybrid_observations_count
+        == 0
+    ):
+      raise ValueError(
+          'enable_hybrid_prompt_assembly requires at least one non-zero '
+          'hybrid count.'
+      )
+
+    if (
+        self.rehydration_evidence_token_budget
+        > self.hybrid_prompt_token_budget
+    ):
+      raise ValueError(
+          'rehydration_evidence_token_budget must be <= '
+          'hybrid_prompt_token_budget.'
+      )
+
+    return self
