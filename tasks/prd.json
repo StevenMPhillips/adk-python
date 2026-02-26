@@ -1,0 +1,285 @@
+{
+  "project": "adk-python",
+  "branchName": "ralph/lsm-observational-compaction",
+  "description": "LSM-Style + Observational Memory Compaction System - Hybrid deterministic artifact compaction with LLM-written narrative memory for ADK",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Define artifact compaction data models",
+      "description": "As a developer, I need Pydantic models for ToolRunCompaction, PatchCompaction, and shared sub-models (CompactionStats, FileLineRef, HunkSummary, Provenance) so that deterministic compaction artifacts have a well-defined schema.",
+      "acceptanceCriteria": [
+        "Create new module at src/google/adk/compaction/ with __init__.py",
+        "Create src/google/adk/compaction/models.py with shared sub-models: CompactionStats (raw_tokens_est, compact_tokens_est, compression_ratio), FileLineRef (path, line, col optional), HunkSummary (path, anchor_before, anchor_after, snippet), Provenance (event_id, stdout_offsets optional, stderr_offsets optional)",
+        "ToolRunCompaction model with fields: event_id (str), compaction_version (int), command (str), exit_code (int), duration_ms (int optional), error_signatures (list[str]), key_errors (list[str]), tests_failed (list[str]), file_line_refs (list[FileLineRef]), trimmed_trace (list[str]), salient_snippets (list[str]), stats (CompactionStats), provenance (Provenance)",
+        "PatchCompaction model with fields: event_id (str), compaction_version (int), files_changed (list[str]), hunks (list[HunkSummary]), semantic_tags (list[str]), stats (CompactionStats), provenance (Provenance)",
+        "All models use Pydantic v2 with ConfigDict(extra='forbid'), alias_generator=alias_generators.to_camel, populate_by_name=True",
+        "All models are serializable to/from JSON (round-trip test)",
+        "Typecheck/lint passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "status": "complete",
+      "notes": "Implemented in commit ac6fb3ce"
+    },
+    {
+      "id": "US-002",
+      "title": "Define observational memory data models",
+      "description": "As a developer, I need Pydantic models for Observation, Reflection, and TaskStateAnchor so that the LLM-written narrative memory layer has a well-defined schema.",
+      "acceptanceCriteria": [
+        "Add to src/google/adk/compaction/models.py: EvidenceRef model with fields: ref_type (str, e.g. 'event', 'tool_run', 'patch', 'observation'), ref_id (str)",
+        "Add Decision model with fields: text (str), kind (Literal['explicit', 'inferred']), evidence_refs (list[EvidenceRef])",
+        "Add EvidencedItem model with fields: text (str), evidence_refs (list[EvidenceRef])",
+        "Observation model with fields: observation_id (str, default uuid), session_id (str), start_seq (int), end_seq (int), text (str), decisions (list[Decision]), learned_constraints (list[Decision]), open_questions (list[EvidencedItem]), next_steps (list[EvidencedItem]), evidence_refs (list[EvidenceRef])",
+        "Reflection model with fields: reflection_id (str, default uuid), session_id (str), covers_observation_ids (list[str]), text (str), stable_facts (list[EvidencedItem]), recurring_failures (list[EvidencedItem]), strategy_updates (list[EvidencedItem]), evidence_refs (list[EvidenceRef])",
+        "TaskStateAnchor model with fields: session_id (str), state_version (int, default 0), objective (str), constraints (list[EvidencedItem]), hypotheses (list[EvidencedItem]), known_failures (list[EvidencedItem]), current_plan (list[EvidencedItem]), next_steps (list[EvidencedItem]), last_updated_seq (int)",
+        "All models use same Pydantic v2 ConfigDict conventions as US-001",
+        "All models are serializable to/from JSON (round-trip test)",
+        "Typecheck/lint passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Implement base compactor and generic fallback compactor",
+      "description": "As a developer, I need the BaseToolRunCompactor abstract class, GenericToolRunCompactor fallback, and ToolRunCompactorRegistry so that compactors have a consistent interface and unknown tools get basic extraction.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/compactors/__init__.py",
+        "Create src/google/adk/compaction/compactors/base.py with BaseToolRunCompactor abstract class having method compact(event: Event) -> ToolRunCompaction | None",
+        "Create src/google/adk/compaction/compactors/generic.py with GenericToolRunCompactor that extracts: exit code, last N lines of stderr (configurable, default 20), any file:line patterns found via regex, and computes CompactionStats",
+        "Create src/google/adk/compaction/compactors/registry.py with ToolRunCompactorRegistry that selects the right compactor based on command string matching (register method + get_compactor method), falls back to GenericToolRunCompactor",
+        "GenericToolRunCompactor caps output to configurable token budget (default 600 tokens)",
+        "Unit tests for GenericToolRunCompactor with sample tool output showing file:line extraction and stderr trimming",
+        "Unit tests for ToolRunCompactorRegistry command matching and fallback",
+        "Typecheck/lint passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Implement PytestCompactor",
+      "description": "As a coding agent framework, I want to extract structured artifacts from pytest output so that exact test failures, assertion messages, and file:line refs survive compaction.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/compactors/pytest_compactor.py with PytestCompactor extending BaseToolRunCompactor",
+        "Extracts test names from FAILED/ERROR lines (e.g. 'FAILED tests/test_auth.py::test_login')",
+        "Extracts assertion messages (lines starting with 'E   ')",
+        "Extracts file:line refs from traceback lines",
+        "Computes normalized error signatures (format: 'pytest::ErrorType::test_path::test_name')",
+        "Populates tests_failed, error_signatures, key_errors, file_line_refs, trimmed_trace, salient_snippets fields",
+        "Caps output to configurable token budget (default 600 tokens)",
+        "Computes CompactionStats with raw vs compact token estimates",
+        "Register PytestCompactor in the registry for commands matching 'pytest'",
+        "Unit tests with real pytest output samples (at least 2: short failure, multi-failure with traceback) achieving >10x compression while preserving all error signatures and file:line refs",
+        "Typecheck/lint passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Implement MypyCompactor and RuffCompactor",
+      "description": "As a coding agent framework, I want to extract structured artifacts from mypy and ruff/flake8 output so that error codes, file:line refs, and messages survive compaction.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/compactors/mypy_compactor.py with MypyCompactor extending BaseToolRunCompactor",
+        "MypyCompactor extracts: error codes (e.g. [assignment]), file:line:col refs, error messages from mypy output format 'path:line:col: error: message [code]'",
+        "MypyCompactor computes normalized error signatures (format: 'mypy::code::path')",
+        "Create src/google/adk/compaction/compactors/ruff_compactor.py with RuffCompactor extending BaseToolRunCompactor",
+        "RuffCompactor extracts: rule codes (e.g. E501, F401), file:line:col refs, error messages from ruff output format 'path:line:col: code message'",
+        "RuffCompactor computes normalized error signatures (format: 'ruff::code::path')",
+        "Both compactors cap output to configurable token budget (default 400 tokens)",
+        "Register both in the registry for commands matching 'mypy' and 'ruff'/'flake8'",
+        "Unit tests with real mypy output sample (at least 3 errors) and ruff output sample (at least 3 violations)",
+        "Typecheck/lint passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Implement PatchCompactor for unified diffs",
+      "description": "As a coding agent framework, I want to compress unified diffs into structured summaries preserving changed files and key hunks.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/compactors/patch_compactor.py with PatchCompactor class having method compact(event: Event) -> PatchCompaction | None",
+        "Parses unified diff format (--- a/path, +++ b/path, @@ lines)",
+        "Extracts list of changed files and hunk count per file",
+        "Extracts key hunks with before/after anchor lines and trimmed snippet",
+        "Prioritizes hunks by size (larger changes first) when budget exceeded",
+        "Caps output to configurable token budget (default 800 tokens)",
+        "Computes CompactionStats with raw vs compact token estimates",
+        "Unit tests with sample unified diffs (single file, multi-file, large diff exceeding budget) showing correct extraction",
+        "Typecheck/lint passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Implement pluggable compaction storage interface and InMemory implementation",
+      "description": "As a developer, I need a storage abstraction for compaction artifacts following ADK's abstract base + implementation pattern.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/storage/__init__.py",
+        "Create src/google/adk/compaction/storage/base_compaction_service.py with BaseCompactionService abstract class",
+        "Abstract methods: save_tool_run_compaction(), save_patch_compaction(), save_observation(), save_reflection(), save_task_state(), get_tool_run_compaction(event_id), get_patch_compaction(event_id), get_observations(session_id, seq_range optional), get_latest_reflection(session_id), get_task_state(session_id), query_by_error_signature(signature), query_by_file_path(path)",
+        "All methods are async, consistent with ADK's async patterns",
+        "Create src/google/adk/compaction/storage/in_memory_compaction_service.py with InMemoryCompactionService using dicts",
+        "Unit tests for InMemoryCompactionService covering: save and retrieve each artifact type, query_by_error_signature returns matching compactions, query_by_file_path returns matching compactions, get_observations with seq_range filtering",
+        "Typecheck/lint passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Integrate deterministic compaction into runner pipeline",
+      "description": "As a developer, I want deterministic compactions to run automatically after each tool call event so compacted artifacts are available without manual intervention.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/config.py with HybridEventsCompactionConfig extending or paralleling EventsCompactionConfig, with fields: compaction_service (BaseCompactionService), tool_run_compactor_registry (ToolRunCompactorRegistry), patch_compactor (PatchCompactor), enable_deterministic_compaction (bool, default True), enable_observational_memory (bool, default False)",
+        "After each tool run event in the runner (in compaction.py or appropriate hook), if deterministic compaction is enabled, the appropriate compactor runs and result is stored via compaction service",
+        "After each patch/diff event, the patch compactor runs similarly",
+        "Compaction runs inline (not background) since it's deterministic and fast",
+        "Existing EventsCompactionConfig and LlmEventSummarizer continue to work unchanged (backward compatible)",
+        "Integration test showing compaction artifacts are created for a multi-turn agent session with tool calls",
+        "Typecheck/lint passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Implement Observation writer",
+      "description": "As a coding agent framework, I want to periodically generate concise narrative observations over spans of events for narrative continuity.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/writers/__init__.py",
+        "Create src/google/adk/compaction/writers/observation_writer.py with ObservationWriter class",
+        "Takes inputs: recent raw turns, recent ToolRunCompactions/PatchCompactions, current TaskState, optionally last Observation",
+        "Triggers when token budget for raw events exceeds configurable threshold OR when episode closes",
+        "Uses an LLM (via ADK's BaseLlm) to generate one Observation JSON covering the seq range",
+        "Prompt template enforces: every decision/constraint must include evidence_refs pointing to event_ids/tool_run_ids",
+        "kind field on decisions is 'explicit' only when directly supported by evidence; otherwise 'inferred'",
+        "Observations are append-only (stored via compaction service)",
+        "Unit test with mocked LLM verifying observation structure and evidence ref requirements",
+        "Typecheck/lint passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Implement Reflection writer",
+      "description": "As a coding agent framework, I want to periodically condense multiple observations into a single reflection for long-session stability.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/writers/reflection_writer.py with ReflectionWriter class",
+        "Takes a window of Observations (e.g. 10-20)",
+        "Triggers when observation count exceeds configurable threshold (default 10)",
+        "Uses LLM to generate one Reflection JSON citing observation_ids",
+        "Every stable_fact, recurring_failure, and strategy_update must cite evidence_refs",
+        "New facts not supported by observations are omitted or labeled as hypotheses",
+        "Unit test with mocked LLM verifying reflection structure",
+        "Typecheck/lint passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Implement TaskState updater",
+      "description": "As a coding agent framework, I want a small stable working memory anchor that is always included in the prompt.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/writers/task_state_updater.py with TaskStateUpdater class",
+        "Updates TaskState after each Observation or key tool run",
+        "Constraints and decisions enter TaskState only if supported by evidence refs or explicit user instruction",
+        "Inferred statements go to hypotheses list, not constraints",
+        "TaskState is versioned (bumps state_version on each update)",
+        "TaskState is capped to small token budget (configurable, default ~200 tokens)",
+        "Can be updated deterministically (from compaction artifacts) or via LLM (from observations)",
+        "Unit tests verifying provenance requirements and version bumping",
+        "Typecheck/lint passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Implement rehydration planner and executor",
+      "description": "As a coding agent framework, I want to pull raw evidence on demand when summaries aren't enough for debugging loops.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/rehydration.py with RehydrationPlanner and RehydrationExecutor classes",
+        "RehydrationPlanner reads: TaskState, recent observations, recent compactions, latest user message",
+        "Planner outputs retrieval queries with filters: error signature, test name, file path, time range",
+        "RehydrationExecutor fetches from compaction service: matching compactions by error signature, file path, and time range",
+        "Results packaged as EvidencePack model (list of raw excerpts + compacted artifacts)",
+        "EvidencePack has configurable token budget (default 2000 tokens)",
+        "Triggers on: missing evidence, repeated error signatures (thrash detection), user referencing older specifics",
+        "Unit tests for planner query generation and executor retrieval",
+        "Typecheck/lint passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Implement hybrid prompt assembly",
+      "description": "As a coding agent framework, I want the prompt assembled from hybrid layers so most turns are cache-friendly.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/assembly.py with HybridPromptAssembler class",
+        "Builds prompt from layers: (1) System instructions, (2) TaskState, (3) Latest Reflection if any, (4) Last 1-3 Observations, (5) Last K raw turns bounded, (6) Latest ToolRunCompactions/PatchCompactions bounded",
+        "When rehydration is triggered, Evidence Pack is inserted after Observations",
+        "Total token budget for assembled prompt is configurable",
+        "Falls back to existing _get_contents behavior when hybrid compaction is not configured",
+        "Integration test comparing prompt token counts between existing compaction and hybrid compaction over a 20+ turn session",
+        "Typecheck/lint passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Add SQLite-based compaction service",
+      "description": "As a developer deploying ADK with persistent sessions, I want compaction artifacts stored in SQLite.",
+      "acceptanceCriteria": [
+        "Create src/google/adk/compaction/storage/sqlite_compaction_service.py with SqliteCompactionService implementing BaseCompactionService",
+        "Schema with tables for: tool_run_compactions, patch_compactions, observations, reflections, task_states",
+        "Uses aiosqlite (consistent with existing SqliteSessionService)",
+        "Supports query_by_error_signature and query_by_file_path via indexed columns",
+        "Migration support for schema changes (version field in a metadata table)",
+        "Integration tests with actual SQLite database covering CRUD and query operations",
+        "Typecheck/lint passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "End-to-end integration test",
+      "description": "As a developer, I want a full integration test demonstrating the hybrid compaction system working end-to-end.",
+      "acceptanceCriteria": [
+        "Test simulates a 20+ turn session with: user messages, tool calls (pytest with failures), patches/diffs, follow-up debugging",
+        "Verifies deterministic compactions are created for each tool run and patch",
+        "Verifies observations are generated at configured intervals",
+        "Verifies TaskState is maintained and updated with provenance",
+        "Verifies that after compaction, error signatures and file:line refs are still retrievable",
+        "Verifies rehydration can recover raw evidence for a specific error signature",
+        "Compares token usage vs existing LLM-only compaction (should show improvement)",
+        "Uses InMemoryCompactionService (no external dependencies)",
+        "Typecheck/lint passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

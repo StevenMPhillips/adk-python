@@ -1,0 +1,9 @@
+# Ralph Loop Progress
+
+## 2026-02-25 22:21 PST - Story US-001: Define artifact compaction data models
+- Sub-agent: ses_367670ebaffeokw1ZmJRRASQBj
+- Commit: ac6fb3ce (by: sub-agent)
+- Files changed: src/google/adk/compaction/__init__.py, src/google/adk/compaction/models.py, tests/unittests/compaction/__init__.py, tests/unittests/compaction/test_models.py
+- Duration: N/A
+- Status: complete
+---
