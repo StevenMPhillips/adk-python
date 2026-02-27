@@ -89,3 +89,61 @@ Proceed to a full-quality run with a real target agent and external evaluators:
 2) Re-run full matrix for oracle and s_cleaned with meaningful agent outputs.
 3) Publish final recommendation after openai-judge evaluation and per-type
    deltas.
+
+## Final Credentialed Matrix (Completed)
+
+All six full runs completed with the dedicated in-repo benchmark agent:
+
+- `full_longmemeval_oracle_baseline` (500)
+- `full_longmemeval_oracle_hybrid` (500)
+- `full_longmemeval_oracle_hybrid_observational` (500)
+- `full_longmemeval_s_cleaned_baseline` (500)
+- `full_longmemeval_s_cleaned_hybrid` (500)
+- `full_longmemeval_s_cleaned_hybrid_observational` (500)
+
+OpenAI-judge summaries (`gpt-4o-mini`) were generated for all runs.
+
+### Aggregate Results
+
+Oracle split:
+- baseline overall accuracy: **0.002**
+- hybrid overall accuracy: **0.004**
+- hybrid_observational overall accuracy: **0.002**
+
+S-cleaned split:
+- baseline overall accuracy: **0.000**
+- hybrid overall accuracy: **0.002**
+- hybrid_observational overall accuracy: **0.000**
+
+Observed pattern:
+- extremely low absolute accuracy across all modes with this dedicated agent.
+- a small lift appears for `hybrid` vs `baseline` in `single-session-user`.
+- no measurable lift from `hybrid_observational` with current agent/prompting.
+
+### Interpretation
+
+These numbers should be interpreted as **harness readiness**, not product
+quality readiness:
+
+- The harness and scoring pipeline are now operational end to end.
+- The dedicated benchmark agent is intentionally simple and underpowered for
+  LongMemEval difficulty, so absolute scores are not deployment-grade signals.
+
+### Additional Notes
+
+- During long `hybrid_observational` runs, some observation-writer generations
+  still fail with invalid JSON (truncated model output). The runner degrades
+  gracefully and continues, but this lowers observational artifact yield.
+- JSONL output integrity needed one repair pass in one run due concatenated
+  entries from interrupted resumptions; deduplication was applied by
+  `question_id` before final scoring.
+
+### Final Recommendation
+
+Use this benchmark setup as the official ADK LongMemEval harness baseline, but
+do not use the current dedicated sample agent scores as rollout criteria.
+
+Next required step for decision-grade evaluation:
+1) benchmark a realistic target agent (or tuned benchmark agent), and
+2) tighten observational-writer structured-output robustness before relying on
+   `hybrid_observational` comparisons.
