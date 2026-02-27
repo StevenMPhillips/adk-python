@@ -29,6 +29,8 @@ from tools.longmemeval._replay_utils import parse_timestamp
 
 
 _VALID_CONFIGS = ('baseline', 'hybrid', 'hybrid_observational')
+_RESOURCE_EXHAUSTED_TEXT = 'RESOURCE_EXHAUSTED'
+_UNAVAILABLE_TEXT = 'UNAVAILABLE'
 
 
 def parse_args() -> argparse.Namespace:
@@ -63,6 +65,23 @@ def parse_args() -> argparse.Namespace:
       type=int,
       default=None,
       help='Optional cap on number of cases to run.',
+  )
+  parser.add_argument(
+      '--resume',
+      action='store_true',
+      help='Resume from existing predictions.jsonl in --out directory.',
+  )
+  parser.add_argument(
+      '--max_retries_per_case',
+      type=int,
+      default=8,
+      help='Max retries per case for retryable model failures.',
+  )
+  parser.add_argument(
+      '--retry_backoff_seconds',
+      type=int,
+      default=30,
+      help='Base backoff seconds for per-case retries.',
   )
   return parser.parse_args()
 
@@ -221,6 +240,25 @@ def _get_commit_hash(repo_root: pathlib.Path) -> str | None:
     return None
 
 
+def _is_retryable_model_error(exc: Exception) -> bool:
+  full_text = f'{type(exc).__name__}: {exc}'
+  return (
+      _RESOURCE_EXHAUSTED_TEXT in full_text or _UNAVAILABLE_TEXT in full_text
+  )
+
+
+def _existing_prediction_count(path: pathlib.Path) -> int:
+  if not path.exists():
+    return 0
+
+  count = 0
+  with path.open('r', encoding='utf-8') as file_handle:
+    for line in file_handle:
+      if line.strip():
+        count += 1
+  return count
+
+
 async def _run_case(
     *,
     runner: InMemoryRunner,
@@ -280,19 +318,48 @@ async def main_async() -> None:
   predictions_path = out_dir / 'predictions.jsonl'
   repo_root = pathlib.Path(__file__).resolve().parents[2]
 
-  processed_count = 0
-  with predictions_path.open('w', encoding='utf-8') as out_file:
+  resume_offset = 0
+  if args.resume:
+    resume_offset = _existing_prediction_count(predictions_path)
+    resume_offset = min(resume_offset, len(cases))
+
+  processed_count = resume_offset
+  file_mode = 'a' if args.resume else 'w'
+  with predictions_path.open(file_mode, encoding='utf-8') as out_file:
     async with InMemoryRunner(app=app) as runner:
       for index, case in enumerate(cases, start=1):
-        prediction = await _run_case(
-            runner=runner,
-            app=app,
-            case=case,
-            index=index,
-            run_config=run_config,
-        )
+        if index <= resume_offset:
+          continue
+
+        attempt = 0
+        while True:
+          try:
+            prediction = await _run_case(
+                runner=runner,
+                app=app,
+                case=case,
+                index=index,
+                run_config=run_config,
+            )
+            break
+          except Exception as exc:  # pylint: disable=broad-exception-caught
+            if not _is_retryable_model_error(exc):
+              raise
+            if attempt >= args.max_retries_per_case:
+              raise
+
+            attempt += 1
+            delay_seconds = args.retry_backoff_seconds * attempt
+            print(
+                'Resource exhausted on case '
+                f'{index}; retry {attempt}/{args.max_retries_per_case} '
+                f'in {delay_seconds}s.'
+            )
+            await asyncio.sleep(delay_seconds)
+
         out_file.write(json.dumps(prediction, ensure_ascii=True, sort_keys=True))
         out_file.write('\n')
+        out_file.flush()
         processed_count += 1
 
   metadata = {
@@ -305,6 +372,10 @@ async def main_async() -> None:
           datetime.timezone.utc
       ).isoformat(),
       'agent_module_path': args.agent_module_path,
+      'resume': args.resume,
+      'resume_offset': resume_offset,
+      'max_retries_per_case': args.max_retries_per_case,
+      'retry_backoff_seconds': args.retry_backoff_seconds,
       'observational_runtime_triggered': (
           args.config_name == 'hybrid_observational'
       ),

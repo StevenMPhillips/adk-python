@@ -68,7 +68,8 @@ Command template:
   --dataset tools/longmemeval/data/longmemeval_m_cleaned.json \
   --out tools/longmemeval/runs/<run_name> \
   --config_name <baseline|hybrid|hybrid_observational> \
-  [--max_cases 100]
+  [--max_cases 100] \
+  [--resume --max_retries_per_case 8 --retry_backoff_seconds 30]
 ```
 
 Config matrix:
@@ -79,6 +80,13 @@ Config matrix:
   observational memory off.
 - `hybrid_observational`: deterministic compaction on, hybrid prompt assembly
   on, observational memory on (plus runtime metadata trigger).
+
+Long-running run controls:
+
+- `--resume`: continue from an existing `predictions.jsonl` in the same output
+  directory.
+- `--max_retries_per_case`: retry cap for `RESOURCE_EXHAUSTED` failures.
+- `--retry_backoff_seconds`: linear backoff base for retries.
 
 Example runs:
 
