@@ -17,11 +17,15 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 import json
+import re
 
 from google.genai import types
 
 from ...models.base_llm import BaseLlm
 from ...models.llm_request import LlmRequest
+from ..models import Decision
+from ..models import EvidencedItem
+from ..models import EvidenceRef
 from ..models import Observation
 from ..models import PatchCompaction
 from ..models import TaskStateAnchor
@@ -119,6 +123,12 @@ class ObservationWriter:
     llm_request.set_output_schema(Observation)
     raw_json = await self._generate_json_output(llm_request)
     generated_observation = Observation.model_validate_json(raw_json)
+    generated_observation = self._sanitize_observation(
+        observation=generated_observation,
+        evidence_ref_ids=evidence_ref_ids,
+    )
+    if self._should_skip_observation(generated_observation):
+      return None
     self._validate_observation(
         observation=generated_observation,
         evidence_ref_ids=evidence_ref_ids,
@@ -133,6 +143,152 @@ class ObservationWriter:
     )
     await self._compaction_service.save_observation(observation_to_save)
     return observation_to_save
+
+  def _sanitize_observation(
+      self,
+      *,
+      observation: Observation,
+      evidence_ref_ids: frozenset[str],
+  ) -> Observation:
+    sanitized_decisions = self._sanitize_decisions(
+        observation.decisions,
+        evidence_ref_ids=evidence_ref_ids,
+    )
+    sanitized_constraints = self._sanitize_decisions(
+        observation.learned_constraints,
+        evidence_ref_ids=evidence_ref_ids,
+    )
+    sanitized_questions = self._sanitize_items(
+        observation.open_questions,
+        evidence_ref_ids=evidence_ref_ids,
+    )
+    sanitized_next_steps = self._sanitize_items(
+        observation.next_steps,
+        evidence_ref_ids=evidence_ref_ids,
+    )
+    sanitized_top_refs = self._sanitize_evidence_refs(
+        observation.evidence_refs,
+        evidence_ref_ids=evidence_ref_ids,
+    )
+
+    return observation.model_copy(
+        update={
+            'decisions': sanitized_decisions,
+            'learned_constraints': sanitized_constraints,
+            'open_questions': sanitized_questions,
+            'next_steps': sanitized_next_steps,
+            'evidence_refs': sanitized_top_refs,
+        }
+    )
+
+  def _should_skip_observation(self, observation: Observation) -> bool:
+    if observation.decisions or observation.learned_constraints:
+      return False
+    for item in observation.open_questions + observation.next_steps:
+      if item.evidence_refs:
+        return False
+    return not observation.evidence_refs
+
+  def _sanitize_decisions(
+      self,
+      decisions: Sequence[Decision],
+      *,
+      evidence_ref_ids: frozenset[str],
+  ) -> list[Decision]:
+    sanitized_decisions: list[Decision] = []
+    for decision in decisions:
+      sanitized_refs = self._sanitize_evidence_refs(
+          decision.evidence_refs,
+          evidence_ref_ids=evidence_ref_ids,
+      )
+      if not sanitized_refs:
+        continue
+      sanitized_decisions.append(
+          decision.model_copy(update={'evidence_refs': sanitized_refs})
+      )
+    return sanitized_decisions
+
+  def _sanitize_items(
+      self,
+      items: Sequence[EvidencedItem],
+      *,
+      evidence_ref_ids: frozenset[str],
+  ) -> list[EvidencedItem]:
+    sanitized_items: list[EvidencedItem] = []
+    for item in items:
+      sanitized_refs = self._sanitize_evidence_refs(
+          item.evidence_refs,
+          evidence_ref_ids=evidence_ref_ids,
+      )
+      sanitized_items.append(item.model_copy(update={'evidence_refs': sanitized_refs}))
+    return sanitized_items
+
+  def _sanitize_evidence_refs(
+      self,
+      evidence_refs: Sequence[EvidenceRef],
+      *,
+      evidence_ref_ids: frozenset[str],
+  ) -> list[EvidenceRef]:
+    normalized_allowed = {
+        ref_id.casefold(): ref_id for ref_id in evidence_ref_ids
+    }
+    sanitized_refs: list[EvidenceRef] = []
+    seen_refs: set[tuple[str, str]] = set()
+    for evidence_ref in evidence_refs:
+      canonical_ref_id = self._canonicalize_ref_id(
+          evidence_ref.ref_id,
+          evidence_ref_ids=evidence_ref_ids,
+          normalized_allowed=normalized_allowed,
+      )
+      if canonical_ref_id is None:
+        continue
+      dedupe_key = (evidence_ref.ref_type, canonical_ref_id)
+      if dedupe_key in seen_refs:
+        continue
+      seen_refs.add(dedupe_key)
+      sanitized_refs.append(
+          evidence_ref.model_copy(update={'ref_id': canonical_ref_id})
+      )
+    return sanitized_refs
+
+  def _canonicalize_ref_id(
+      self,
+      ref_id: str,
+      *,
+      evidence_ref_ids: frozenset[str],
+      normalized_allowed: dict[str, str],
+  ) -> str | None:
+    normalized_ref_id = ref_id.strip().strip('`"\'')
+    if not normalized_ref_id:
+      return None
+    if normalized_ref_id in evidence_ref_ids:
+      return normalized_ref_id
+
+    casefold_id = normalized_ref_id.casefold()
+    if casefold_id in normalized_allowed:
+      return normalized_allowed[casefold_id]
+
+    for token in re.split(r'[^A-Za-z0-9:_\-]+', normalized_ref_id):
+      if not token:
+        continue
+      if token in evidence_ref_ids:
+        return token
+      token_casefold = token.casefold()
+      if token_casefold in normalized_allowed:
+        return normalized_allowed[token_casefold]
+
+    matching_ids: list[str] = []
+    for allowed_ref_id in evidence_ref_ids:
+      match = re.search(
+          rf'(^|[^A-Za-z0-9_\-]){re.escape(allowed_ref_id)}'
+          r'([^A-Za-z0-9_\-]|$)',
+          normalized_ref_id,
+      )
+      if match:
+        matching_ids.append(allowed_ref_id)
+    if matching_ids:
+      return max(matching_ids, key=len)
+    return None
 
   async def _generate_json_output(self, llm_request: LlmRequest) -> str:
     """Runs the LLM and extracts a JSON object from text parts."""

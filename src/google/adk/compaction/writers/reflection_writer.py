@@ -16,11 +16,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import json
+import re
 
 from google.genai import types
 
 from ...models.base_llm import BaseLlm
 from ...models.llm_request import LlmRequest
+from ..models import EvidencedItem
+from ..models import EvidenceRef
 from ..models import Observation
 from ..models import Reflection
 from ..models import TaskStateAnchor
@@ -95,6 +98,12 @@ class ReflectionWriter:
     llm_request.set_output_schema(Reflection)
     raw_json = await self._generate_json_output(llm_request)
     generated_reflection = Reflection.model_validate_json(raw_json)
+    generated_reflection = self._sanitize_reflection(
+        reflection=generated_reflection,
+        observation_ids=observation_ids,
+    )
+    if self._should_skip_reflection(generated_reflection):
+      return None
     self._validate_reflection(
         reflection=generated_reflection,
         observation_ids=observation_ids,
@@ -105,6 +114,166 @@ class ReflectionWriter:
     )
     await self._compaction_service.save_reflection(reflection_to_save)
     return reflection_to_save
+
+  def _sanitize_reflection(
+      self,
+      *,
+      reflection: Reflection,
+      observation_ids: frozenset[str],
+  ) -> Reflection:
+    normalized_allowed = {
+        observation_id.casefold(): observation_id
+        for observation_id in observation_ids
+    }
+    covers_observation_ids = self._sanitize_observation_ids(
+        reflection.covers_observation_ids,
+        observation_ids=observation_ids,
+        normalized_allowed=normalized_allowed,
+    )
+    stable_facts = self._sanitize_items(
+        reflection.stable_facts,
+        observation_ids=observation_ids,
+        normalized_allowed=normalized_allowed,
+    )
+    recurring_failures = self._sanitize_items(
+        reflection.recurring_failures,
+        observation_ids=observation_ids,
+        normalized_allowed=normalized_allowed,
+    )
+    strategy_updates = self._sanitize_items(
+        reflection.strategy_updates,
+        observation_ids=observation_ids,
+        normalized_allowed=normalized_allowed,
+    )
+    top_level_refs = self._sanitize_evidence_refs(
+        reflection.evidence_refs,
+        observation_ids=observation_ids,
+        normalized_allowed=normalized_allowed,
+    )
+
+    return reflection.model_copy(
+        update={
+            'covers_observation_ids': covers_observation_ids,
+            'stable_facts': stable_facts,
+            'recurring_failures': recurring_failures,
+            'strategy_updates': strategy_updates,
+            'evidence_refs': top_level_refs,
+        }
+    )
+
+  def _should_skip_reflection(self, reflection: Reflection) -> bool:
+    if reflection.covers_observation_ids:
+      return False
+    if reflection.stable_facts:
+      return False
+    if reflection.recurring_failures:
+      return False
+    if reflection.strategy_updates:
+      return False
+    return not reflection.evidence_refs
+
+  def _sanitize_observation_ids(
+      self,
+      observation_id_candidates: Sequence[str],
+      *,
+      observation_ids: frozenset[str],
+      normalized_allowed: dict[str, str],
+  ) -> list[str]:
+    sanitized_ids: list[str] = []
+    seen_ids: set[str] = set()
+    for observation_id in observation_id_candidates:
+      canonical_id = self._canonicalize_observation_id(
+          observation_id,
+          observation_ids=observation_ids,
+          normalized_allowed=normalized_allowed,
+      )
+      if canonical_id is None or canonical_id in seen_ids:
+        continue
+      seen_ids.add(canonical_id)
+      sanitized_ids.append(canonical_id)
+    return sanitized_ids
+
+  def _sanitize_items(
+      self,
+      items: Sequence[EvidencedItem],
+      *,
+      observation_ids: frozenset[str],
+      normalized_allowed: dict[str, str],
+  ) -> list[EvidencedItem]:
+    sanitized_items: list[EvidencedItem] = []
+    for item in items:
+      sanitized_refs = self._sanitize_evidence_refs(
+          item.evidence_refs,
+          observation_ids=observation_ids,
+          normalized_allowed=normalized_allowed,
+      )
+      if not sanitized_refs:
+        continue
+      sanitized_items.append(item.model_copy(update={'evidence_refs': sanitized_refs}))
+    return sanitized_items
+
+  def _sanitize_evidence_refs(
+      self,
+      evidence_refs: Sequence[EvidenceRef],
+      *,
+      observation_ids: frozenset[str],
+      normalized_allowed: dict[str, str],
+  ) -> list[EvidenceRef]:
+    sanitized_refs: list[EvidenceRef] = []
+    seen_refs: set[tuple[str, str]] = set()
+    for evidence_ref in evidence_refs:
+      canonical_id = self._canonicalize_observation_id(
+          evidence_ref.ref_id,
+          observation_ids=observation_ids,
+          normalized_allowed=normalized_allowed,
+      )
+      if canonical_id is None:
+        continue
+      dedupe_key = (evidence_ref.ref_type, canonical_id)
+      if dedupe_key in seen_refs:
+        continue
+      seen_refs.add(dedupe_key)
+      sanitized_refs.append(evidence_ref.model_copy(update={'ref_id': canonical_id}))
+    return sanitized_refs
+
+  def _canonicalize_observation_id(
+      self,
+      observation_id: str,
+      *,
+      observation_ids: frozenset[str],
+      normalized_allowed: dict[str, str],
+  ) -> str | None:
+    normalized_id = observation_id.strip().strip('`"\'')
+    if not normalized_id:
+      return None
+    if normalized_id in observation_ids:
+      return normalized_id
+
+    casefold_id = normalized_id.casefold()
+    if casefold_id in normalized_allowed:
+      return normalized_allowed[casefold_id]
+
+    for token in re.split(r'[^A-Za-z0-9:_\-]+', normalized_id):
+      if not token:
+        continue
+      if token in observation_ids:
+        return token
+      token_casefold = token.casefold()
+      if token_casefold in normalized_allowed:
+        return normalized_allowed[token_casefold]
+
+    matching_ids: list[str] = []
+    for allowed_id in observation_ids:
+      match = re.search(
+          rf'(^|[^A-Za-z0-9_\-]){re.escape(allowed_id)}'
+          r'([^A-Za-z0-9_\-]|$)',
+          normalized_id,
+      )
+      if match:
+        matching_ids.append(allowed_id)
+    if matching_ids:
+      return max(matching_ids, key=len)
+    return None
 
   async def _generate_json_output(self, llm_request: LlmRequest) -> str:
     """Runs the LLM and extracts a JSON object from text parts."""

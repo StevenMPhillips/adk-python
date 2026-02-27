@@ -173,11 +173,15 @@ class TestObservationWriter(unittest.IsolatedAsyncioTestCase):
     llm_request = args[0]
     assert isinstance(llm_request, LlmRequest)
     assert kwargs['stream'] is False
-    prompt_text = llm_request.contents[0].parts[0].text
+    contents = llm_request.contents or []
+    assert contents
+    parts = contents[0].parts or []
+    assert parts
+    prompt_text = parts[0].text or ''
     assert 'Every item in decisions and learnedConstraints' in prompt_text
     assert 'Set decision.kind to "explicit" only' in prompt_text
 
-  async def test_maybe_write_observation_rejects_missing_evidence_refs(self):
+  async def test_maybe_write_observation_skips_missing_evidence_refs(self):
     invalid_observation = Observation(
         session_id='placeholder-session',
         start_seq=0,
@@ -204,21 +208,20 @@ class TestObservationWriter(unittest.IsolatedAsyncioTestCase):
 
     self.mock_llm.generate_content_async.return_value = async_gen()
 
-    with pytest.raises(
-        ValueError, match='Each decision/constraint must include evidence_refs.'
-    ):
-      await self.writer.maybe_write_observation(
-          recent_raw_turns=_sample_turns(),
-          recent_tool_run_compactions=[],
-          recent_patch_compactions=[],
-          current_task_state=_sample_task_state(),
-          episode_closed=True,
-      )
+    observation = await self.writer.maybe_write_observation(
+        recent_raw_turns=_sample_turns(),
+        recent_tool_run_compactions=[],
+        recent_patch_compactions=[],
+        current_task_state=_sample_task_state(),
+        episode_closed=True,
+    )
+
+    assert observation is None
 
     saved = await self.compaction_service.get_observations('session-1')
     assert saved == []
 
-  async def test_maybe_write_observation_rejects_unknown_evidence_refs(self):
+  async def test_maybe_write_observation_skips_unknown_evidence_refs(self):
     mock_llm_response = Mock(
         content=Content(
             parts=[Part(text=_sample_observation_json('evt-unknown'))]
@@ -230,12 +233,32 @@ class TestObservationWriter(unittest.IsolatedAsyncioTestCase):
 
     self.mock_llm.generate_content_async.return_value = async_gen()
 
-    with pytest.raises(
-        ValueError, match='Decision evidence ref id is not in allowed evidence'
-    ):
-      await self.writer.maybe_write_observation(
-          recent_raw_turns=_sample_turns(),
-          recent_tool_run_compactions=[],
-          recent_patch_compactions=[],
-          current_task_state=_sample_task_state(),
-      )
+    observation = await self.writer.maybe_write_observation(
+        recent_raw_turns=_sample_turns(),
+        recent_tool_run_compactions=[],
+        recent_patch_compactions=[],
+        current_task_state=_sample_task_state(),
+    )
+
+    assert observation is None
+
+  async def test_maybe_write_observation_canonicalizes_prefixed_evidence_ref(self):
+    json_with_prefixed_ref = _sample_observation_json('event:evt-1')
+    mock_llm_response = Mock(
+        content=Content(parts=[Part(text=json_with_prefixed_ref)])
+    )
+
+    async def async_gen():
+      yield mock_llm_response
+
+    self.mock_llm.generate_content_async.return_value = async_gen()
+
+    observation = await self.writer.maybe_write_observation(
+        recent_raw_turns=_sample_turns(),
+        recent_tool_run_compactions=[],
+        recent_patch_compactions=[],
+        current_task_state=_sample_task_state(),
+    )
+
+    assert observation is not None
+    assert observation.decisions[0].evidence_refs[0].ref_id == 'evt-1'

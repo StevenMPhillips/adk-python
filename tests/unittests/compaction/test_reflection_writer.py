@@ -105,6 +105,23 @@ def _sample_reflection_json() -> str:
   ).model_dump_json(by_alias=True)
 
 
+def _sample_reflection_json_with_ref(ref_id: str) -> str:
+  return Reflection(
+      session_id='placeholder-session',
+      covers_observation_ids=[ref_id],
+      text='Hypothesis: focus on grounded observation ids.',
+      stable_facts=[
+          _sample_item(
+              'Recent fixes depend on cited observation windows.',
+              ref_id,
+          )
+      ],
+      recurring_failures=[],
+      strategy_updates=[],
+      evidence_refs=[_sample_evidence_ref(ref_id)],
+  ).model_dump_json(by_alias=True)
+
+
 @pytest.mark.parametrize(
     'env_variables', ['GOOGLE_AI', 'VERTEX'], indirect=True
 )
@@ -159,14 +176,18 @@ class TestReflectionWriter(unittest.IsolatedAsyncioTestCase):
     llm_request = args[0]
     assert isinstance(llm_request, LlmRequest)
     assert kwargs['stream'] is False
-    prompt_text = llm_request.contents[0].parts[0].text
+    contents = llm_request.contents or []
+    assert contents
+    parts = contents[0].parts or []
+    assert parts
+    prompt_text = parts[0].text or ''
     assert (
         'Every item in stableFacts, recurringFailures, and strategyUpdates'
         in prompt_text
     )
     assert 'label uncertain claims as hypotheses' in prompt_text
 
-  async def test_maybe_write_reflection_rejects_missing_item_evidence(self):
+  async def test_maybe_write_reflection_drops_missing_item_evidence(self):
     invalid_reflection_json = Reflection(
         session_id='placeholder-session',
         covers_observation_ids=['obs-11'],
@@ -185,14 +206,53 @@ class TestReflectionWriter(unittest.IsolatedAsyncioTestCase):
 
     self.mock_llm.generate_content_async.return_value = async_gen()
 
-    with pytest.raises(
-        ValueError,
-        match='Each stable/recurring/strategy item must include evidence_refs.',
-    ):
-      await self.writer.maybe_write_reflection(
-          recent_observations=_sample_observations(12),
-          current_task_state=_sample_task_state(),
-      )
+    reflection = await self.writer.maybe_write_reflection(
+        recent_observations=_sample_observations(12),
+        current_task_state=_sample_task_state(),
+    )
+
+    assert reflection is not None
+    assert reflection.stable_facts == []
 
     saved = await self.compaction_service.get_latest_reflection('session-1')
-    assert saved is None
+    assert saved == reflection
+
+  async def test_maybe_write_reflection_skips_unknown_evidence_refs(self):
+    mock_llm_response = Mock(
+        content=Content(
+            parts=[Part(text=_sample_reflection_json_with_ref('obs-unknown'))]
+        )
+    )
+
+    async def async_gen():
+      yield mock_llm_response
+
+    self.mock_llm.generate_content_async.return_value = async_gen()
+
+    reflection = await self.writer.maybe_write_reflection(
+        recent_observations=_sample_observations(12),
+        current_task_state=_sample_task_state(),
+    )
+
+    assert reflection is None
+
+  async def test_maybe_write_reflection_canonicalizes_prefixed_refs(self):
+    mock_llm_response = Mock(
+        content=Content(
+            parts=[Part(text=_sample_reflection_json_with_ref('observation:obs-12'))]
+        )
+    )
+
+    async def async_gen():
+      yield mock_llm_response
+
+    self.mock_llm.generate_content_async.return_value = async_gen()
+
+    reflection = await self.writer.maybe_write_reflection(
+        recent_observations=_sample_observations(12),
+        current_task_state=_sample_task_state(),
+    )
+
+    assert reflection is not None
+    assert reflection.covers_observation_ids == ['obs-12']
+    assert reflection.stable_facts[0].evidence_refs[0].ref_id == 'obs-12'
